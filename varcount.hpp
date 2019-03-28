@@ -1,3 +1,6 @@
+#ifndef VARCOUNT_HPP
+#define VARCOUNT_HPP
+
 #include <htslib/vcf.h>
 #include <htslib/sam.h>
 #include <cstdio> 
@@ -13,18 +16,22 @@ struct Var {
     VTYPE type = V_UNK;
     std::string alt = "";
     std::string ref = "";
-    std::string id = ""; // won't be used in comparators. only filled by VCF records
+    // the following WON'T be used in comparators!
+    std::string id = ""; 
+    uint32_t rc = 0;
+    uint32_t ac = 0;
 };
 
 // NOTE: we compare the ref SIZE rather than the string to account for the way VCF handles dels
-// TODO: we can find a better/more accurate method for this. 
+// (VCF records del at pos before deletion, BAM/MD records del at pos at deletion)
+// TODO: find a better way to handle this
 inline bool operator==(const Var& l, const Var& r) {
     size_t s1 = l.ref.size(), s2 = r.ref.size();
     return std::tie(l.pos, l.type, l.alt, s1) == std::tie(r.pos, r.type, r.alt, s2);
 }
 
 // NOTE: we compare the ref SIZE rather than the string to account for the way VCF handles dels
-// TODO: we can find a better/more accurate method for this. 
+// TODO: find a better way to handle this
 inline bool operator<(const Var& l, const Var& r) {
     size_t s1 = l.ref.size(), s2 = r.ref.size();
     return std::tie(l.pos, l.type, l.alt, s1) < std::tie(r.pos, r.type, r.alt, s2);
@@ -32,7 +39,11 @@ inline bool operator<(const Var& l, const Var& r) {
 
 
 using VarList = std::vector<Var>;
+using pos2var_map = ska::flat_hash_map< int32_t, VarList >;
+using contig2map_map = ska::flat_hash_map<std::string, pos2var_map>;
 
 VarList bam_to_vars(bam1_t* a);
 VarList bcf_to_vars(bcf1_t* b);
 VarList intersect(const VarList& lhs, const VarList& rhs);
+
+#endif // VARCOUNT_HPP
