@@ -184,15 +184,16 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
 
     bcf_hdr_add_sample(out_vcf_hdr, args.sample_name.data());
     bcf_hdr_remove(out_vcf_hdr, BCF_HL_INFO, NULL);
-    bcf_hdr_remove(out_vcf_hdr, BCF_HL_GEN, NULL);
-    bcf_hdr_remove(out_vcf_hdr, BCF_HL_STR, NULL);
     bcf_hdr_remove(out_vcf_hdr, BCF_HL_FMT, NULL);
-    bcf_hdr_set_version(out_vcf_hdr, "4.3"); // TODO: make sure this is printed at the top
-    // bcf_hdr_append(out_vcf_hdr, "##fileformat=VCFv4.3");
+    // cleanup from original VCF
+    bcf_hdr_remove(out_vcf_hdr, BCF_HL_GEN, "fileDate");
+    bcf_hdr_remove(out_vcf_hdr, BCF_HL_GEN, "bcftools_viewVersion");
+    bcf_hdr_remove(out_vcf_hdr, BCF_HL_GEN, "bcftools_viewCommand");
+    bcf_hdr_remove(out_vcf_hdr, BCF_HL_STR, NULL);
+    bcf_hdr_set_version(out_vcf_hdr, "VCFv4.3");
     bcf_hdr_append(out_vcf_hdr, "##INFO=<ID=ALTCNT,Number=1,Type=Integer,Description=\"Count of reads covering alt allele\">");
     bcf_hdr_append(out_vcf_hdr, "##INFO=<ID=REFCNT,Number=1,Type=Integer,Description=\"Count of reads covering ref allele\">");
-    if (args.thres >= 0) 
-        bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
+    bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
     bcf_hdr_write(out_vcf_fp, out_vcf_hdr);
 
     bcf1_t* out_vcf_rec = bcf_init();
