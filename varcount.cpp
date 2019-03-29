@@ -40,7 +40,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
         qlen = (bam_cigar_type(cs[i]) & 1) ? bam_cigar_oplen(cs[i]) : 0;
         if (bam_cigar_op(cs[i]) == BAM_CINS) {
             std::string ins_seq = "";
-            ins_seq += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos-1)]; // make sure we add the previous seq here
+            ins_seq += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos-1)]; // adding the previous character here for compatibility with VCF format
             for (uint32_t j = 0; j < bam_cigar_oplen(cs[i]); ++j) {
                 ins_seq += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos+j)];
             }
@@ -53,7 +53,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
                     std::string snp = "";
                     snp += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos + (s - rpos))];
                     vs.push_back(vcnt::Var(s, vcnt::VTYPE::V_SNP, snp, it->first));
-                    it = snps.erase(it); // we do this so we don't recheck snps that don't need rechecking, but... maybe deleting it would actually be more expensive?
+                    it = snps.erase(it); // we do this so we don't recheck snps that have already been determined, but... maybe deleting it would actually be more expensive?
                 } else ++it;
             }
         } else if (bam_cigar_op(cs[i]) == BAM_CDEL) {
@@ -150,12 +150,14 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
         if((c->flag & BAM_FUNMAP) == 0 && (c->flag & BAM_FSECONDARY) == 0) {
             if (c->tid != pid) {
                 // load new hash table
+                // TODO: maybe we should do the VCF reading step here (subsetting by region) instead of reading the whole thing beforehand
                 vmap = &(contig2vars[sam_hdr->target_name[c->tid]]);
             }
             pid = c->tid;
 
             vcnt::VarList aln_vars(vcnt::bam_to_vars(aln));
             // can we vectorize or at least parallelize this? would it be worth it?
+            // as of now, the performance bottleneck is the VCF reading
             for (int32_t i = c->pos; i <= bam_endpos(aln); ++i) {
                 auto found = vmap->find(i);
                 if (found != vmap->end()) {
@@ -189,7 +191,8 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
     // bcf_hdr_append(out_vcf_hdr, "##fileformat=VCFv4.3");
     bcf_hdr_append(out_vcf_hdr, "##INFO=<ID=ALTCNT,Number=1,Type=Integer,Description=\"Count of reads covering alt allele\">");
     bcf_hdr_append(out_vcf_hdr, "##INFO=<ID=REFCNT,Number=1,Type=Integer,Description=\"Count of reads covering ref allele\">");
-    bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
+    if (args.thres >= 0) 
+        bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
     bcf_hdr_write(out_vcf_fp, out_vcf_hdr);
 
     bcf1_t* out_vcf_rec = bcf_init();
@@ -199,7 +202,7 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
         for (const auto& v: vs.second)  { // v: {pos, Varlist}
             for (const auto& x: v.second) { // x: {Var}
                 // only output genotype that we know from coverage evidence!
-                if ((x.rc + x.ac) && std::abs(x.rc - x.ac) >= args.thres) {
+                if ((args.thres < 0) || ((x.rc + x.ac) && std::abs(x.rc - x.ac) >= args.thres)) {
                     out_vcf_rec->rid = bcf_hdr_name2id(out_vcf_hdr, vs.first.data());
                     out_vcf_rec->pos = v.first;
                     out_vcf_rec->rlen = x.ref.size();
@@ -209,12 +212,17 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
                     bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &x.ac, 1);
                     bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &x.rc, 1);
                     int32_t gts[2];
-                    if (x.rc >= x.ac) {
-                        gts[0] = bcf_gt_phased(0);
-                        gts[1] = bcf_gt_phased(0);
+                    if (args.thres >= 0) {
+                        if (x.rc >= x.ac) {
+                            gts[0] = bcf_gt_phased(0);
+                            gts[1] = bcf_gt_phased(0);
+                        } else {
+                            gts[0] = bcf_gt_phased(1);
+                            gts[1] = bcf_gt_phased(1);
+                        }
                     } else {
-                        gts[0] = bcf_gt_phased(1);
-                        gts[1] = bcf_gt_phased(1);
+                        gts[0] = bcf_gt_missing;
+                        gts[1] = bcf_gt_missing;
                     }
                     bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 2);
                     bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
@@ -229,12 +237,25 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
     bcf_destroy(vcf_rec);
     bcf_hdr_destroy(vcf_hdr);
     bcf_close(vcf_fp);
-
 }
 
 int main(int argc, char** argv) {
     if (argc < 5) {
-        fprintf(stderr, "usage: ./program <vcf> <sam> output_prefix threshold\n");
+        fprintf(stderr,"description: given a V/BCF file and a S/BAM file, outputs a\n"
+                "VCF with INFO/REFCOUNT and INFO/ALTCOUNT fields such that\n"
+                "INFO/REFCOUNT is the count of alignments covering the ref\n"
+                "allele and INFO/ALTCOUNT is the count of alignments covering\n"
+                "the alt allele\n"
+                "optionally, output a genotype based on a given threshold for\n"
+                "the difference between the alt and ref count\n\n");
+        fprintf(stderr, "usage: ./varcount <vcf> <sam> <output_prefix> <threshold>\n\n");
+        fprintf(stderr, "<vcf>: [bv]cf file name\n"
+                "<sam>: [bs]sam file name\n"
+                "<output_prefix>: prefix of output vcf file (also sample name in the same file)\n"
+                "<threshold>: threshold of difference between ref and alt count to determine 'genotype'\n"
+                "    For a value of 0, a tie (refcount == altcount) defaults to ref\n"
+                "    For a value of <0, all variants and their counts are output, and genotypes are undefined\n"
+                );
         exit(1);
     }
     vcnt::VcntArgs args;
