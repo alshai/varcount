@@ -178,8 +178,8 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
 
 
     // output in VCF format!!
-    std::string out_fname = args.sample_name + ".vcf";
-    vcfFile* out_vcf_fp = bcf_open(out_fname.data(), "w");
+    // std::string out_fname = args.sample_name + ".vcf";
+    vcfFile* out_vcf_fp = bcf_open("-", "w");
     bcf_hdr_t* out_vcf_hdr = bcf_hdr_dup(vcf_hdr);
 
     bcf_hdr_add_sample(out_vcf_hdr, args.sample_name.data());
@@ -242,21 +242,26 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
 
 int main(int argc, char** argv) {
     if (argc < 5) {
-        fprintf(stderr,"description: given a V/BCF file and a S/BAM file, outputs a\n"
-                "VCF with INFO/REFCOUNT and INFO/ALTCOUNT fields such that\n"
-                "INFO/REFCOUNT is the count of alignments covering the ref\n"
-                "allele and INFO/ALTCOUNT is the count of alignments covering\n"
-                "the alt allele\n"
-                "optionally, output a genotype based on a given threshold for\n"
-                "the difference between the alt and ref count\n\n");
-        fprintf(stderr, "usage: ./varcount <vcf> <sam> <output_prefix> <threshold>\n\n");
-        fprintf(stderr, "<vcf>: [bv]cf file name\n"
-                "<sam>: [bs]sam file name\n"
-                "<output_prefix>: prefix of output vcf file (also sample name in the same file)\n"
-                "<threshold>: threshold of difference between ref and alt count to determine 'genotype'\n"
-                "    For a value of 0, a tie (refcount == altcount) defaults to ref\n"
-                "    For a value of <0, all variants and their counts are output, and genotypes are undefined\n"
-                );
+        fprintf(stderr, "varcount\n========\n\n");
+        fprintf(stderr, 
+"description: given a V/BCF file and a S/BAM file, outputs a VCF with\n\
+    INFO/REFCOUNT and INFO/ALTCOUNT fields such that INFO/REFCOUNT is the count\n\
+    of alignments covering the ref allele and INFO/ALTCOUNT is the count of\n\
+    alignments covering the alt allele. \n\
+    Optionally, output a genotype based on a given threshold for the difference\n\
+    between the alt and ref count\n\
+\n\
+usage: ./varcount <vcf> <sam> <sample_name> <threshold>\n\
+        <vcf>: [bv]cf file name\n\
+        <sam>: [bs]sam file name\n\
+        <sample_name>: sample name in VCF output\n\
+        <threshold>: threshold of difference between ref and alt count to 'predict' genotype\n\
+            threshold>=0: ref/alt chosen if coverage exceeds the other allele\n\
+            by more than threshold. a tie defaults to ref\n\
+            threshold<0 : all variants and their counts are output, and genotypes are undefined\n\
+\n\
+output: a VCF (to stdout) with INFO/REFCOUNT, INFO/ALTCOUNT, and\n\
+    FORMAT/GT fields for the sample 'sample_name'\n");
         exit(1);
     }
     vcnt::VcntArgs args;
