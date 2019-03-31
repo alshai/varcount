@@ -5,13 +5,14 @@
 #include <htslib/vcf.h>
 #include <htslib/sam.h>
 #include <htslib/hts.h>
+#include <getopt.h>
 #include "mdparse.hpp"
 #include "flat_hash_map.hpp"
 #include "varcount.hpp"
 
 
 vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
-    vcnt::VarList vs;
+    VarList vs;
     // look at md string and gather dels, snps
     char* md;
     std::list<std::pair<std::string, int32_t>> snps;
@@ -23,7 +24,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
                 std::string ref = "X"; // place holder for that extra base we have to account for in a deletion
                 ref += m.str;
                 dels.push_back(std::pair<std::string, int32_t>(ref, aln->core.pos + m.p - 1));
-            } 
+            }
             else if (m.st == MD_SNP) {
                 snps.push_back(std::pair<std::string, int32_t>(m.str, aln->core.pos + m.p));
             }
@@ -44,7 +45,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
             for (uint32_t j = 0; j < bam_cigar_oplen(cs[i]); ++j) {
                 ins_seq += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos+j)];
             }
-            vs.push_back(vcnt::Var(rpos-1, vcnt::VTYPE::V_INS, ins_seq, ins_seq.substr(0,1)));
+            vs.push_back(Var(rpos-1, VTYPE::V_INS, ins_seq, ins_seq.substr(0,1)));
         } else if (bam_cigar_op(cs[i]) == BAM_CMATCH) {
             // check potential snps here
             for (auto it = snps.begin(); it != snps.end(); ) {
@@ -52,7 +53,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
                 if (s >= rpos && s < rpos + rlen) {
                     std::string snp = "";
                     snp += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos + (s - rpos))];
-                    vs.push_back(vcnt::Var(s, vcnt::VTYPE::V_SNP, snp, it->first));
+                    vs.push_back(Var(s, VTYPE::V_SNP, snp, it->first));
                     it = snps.erase(it); // we do this so we don't recheck snps that have already been determined, but... maybe deleting it would actually be more expensive?
                 } else ++it;
             }
@@ -62,7 +63,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
                 if (d == rpos - 1) {
                     std::string alt = "";
                     alt += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos - 1)];
-                    vs.push_back(vcnt::Var(d, vcnt::VTYPE::V_DEL, alt, it->first));
+                    vs.push_back(Var(d, VTYPE::V_DEL, alt, it->first));
                     it = dels.erase(it);
                 } else ++it;
             }
@@ -76,17 +77,17 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
 
 // might encounter bug if STRLEN(REF) > 1 && STRLEN(ALT) > 1
 vcnt::VarList vcnt::bcf_to_vars(bcf1_t* b) {
-    vcnt::VarList vs;
+    VarList vs;
     char* ref = b->d.allele[0];
     for (uint32_t i = 1; i < b->n_allele; ++i) {
         char* alt = b->d.allele[i];
         if (alt[0] == '.') continue;
         if (strlen(alt)  < strlen(ref)) { // DEL
-            vs.push_back(vcnt::Var(b->pos, vcnt::VTYPE::V_DEL, alt, ref, b->d.id)); // don't need alt here
+            vs.push_back(Var(b->pos, VTYPE::V_DEL, alt, ref, b->d.id)); // don't need alt here
         } else if (strlen(alt) > strlen(ref)) { // INS
-            vs.push_back(vcnt::Var(b->pos, vcnt::VTYPE::V_INS, alt, ref, b->d.id)); // don't need ref here
+            vs.push_back(Var(b->pos, vcnt::VTYPE::V_INS, alt, ref, b->d.id)); // don't need ref here
         } else { // SNP
-            vs.push_back(vcnt::Var(b->pos, vcnt::VTYPE::V_SNP, alt, ref, b->d.id)); // don't need ref here
+            vs.push_back(Var(b->pos, VTYPE::V_SNP, alt, ref, b->d.id)); // don't need ref here
         }
     }
     return vs;
@@ -100,26 +101,26 @@ void print_varlist(vcnt::VarList vs, FILE* out) {
     } fprintf(out, "\n");
 }
 
-void vcnt::varcount(const vcnt::VcntArgs& args) {
+void vcnt::varcount(const VcntArgs& args) {
     samFile* sam_fp = sam_open(args.sam_fname.data(), "r");
     bam_hdr_t* sam_hdr = sam_hdr_read(sam_fp);
-    bam1_t* aln = bam_init1(); 
-    
+    bam1_t* aln = bam_init1();
+
     vcfFile* vcf_fp = bcf_open(args.vcf_fname.data(), "r");
     bcf_hdr_t* vcf_hdr = bcf_hdr_read(vcf_fp);
     bcf_hdr_set_samples(vcf_hdr, NULL, 0); // no genotypes needed here
     bcf1_t* vcf_rec = bcf_init();
 
-    vcnt::contig2map_map contig2vars;
+    contig2map_map contig2vars;
     for (int32_t i = 0; i < vcf_hdr->n[BCF_DT_CTG]; ++i) {
         const char* seqk = vcf_hdr->id[BCF_DT_CTG][i].key;
-        contig2vars.insert_or_assign(seqk, vcnt::pos2var_map());
+        contig2vars.insert_or_assign(seqk, pos2var_map());
     }
 
     int32_t pid = -1;
     int32_t ppos = -1;
-    vcnt::pos2var_map* vmap = nullptr;
-    vcnt::VarList vs;
+    pos2var_map* vmap = nullptr;
+    VarList vs;
     while (!bcf_read(vcf_fp, vcf_hdr, vcf_rec)) {
         bcf_unpack(vcf_rec, BCF_UN_STR);
         if (vcf_rec->pos != ppos) {
@@ -128,10 +129,10 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
             }
             if (vcf_rec->rid != pid) { // change hash tables here
                 vmap = &(contig2vars[bcf_hdr_id2name(vcf_hdr, vcf_rec->rid)]);
-            } 
+            }
             vs.clear();
-        } 
-        vcnt::VarList more_vs = vcnt::bcf_to_vars(vcf_rec);
+        }
+        VarList more_vs = bcf_to_vars(vcf_rec);
         vs.insert(vs.end(), more_vs.begin(), more_vs.end());
         ppos = vcf_rec->pos;
         pid = vcf_rec->rid;
@@ -155,7 +156,7 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
             }
             pid = c->tid;
 
-            vcnt::VarList aln_vars(vcnt::bam_to_vars(aln));
+            VarList aln_vars(bam_to_vars(aln));
             // can we vectorize or at least parallelize this? would it be worth it?
             // as of now, the performance bottleneck is the VCF reading
             for (int32_t i = c->pos; i <= bam_endpos(aln); ++i) {
@@ -202,33 +203,28 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
     for (const auto& vs: contig2vars) { // vs: {seq, map}
         for (const auto& v: vs.second)  { // v: {pos, Varlist}
             for (const auto& x: v.second) { // x: {Var}
-                // only output genotype that we know from coverage evidence!
-                if ((args.thres < 0) || ((x.rc + x.ac) && std::abs(x.rc - x.ac) >= args.thres)) {
-                    out_vcf_rec->rid = bcf_hdr_name2id(out_vcf_hdr, vs.first.data());
-                    out_vcf_rec->pos = v.first;
-                    out_vcf_rec->rlen = x.ref.size();
-                    std::string allele_str(x.ref + "," + x.alt);
-                    bcf_update_alleles_str(out_vcf_hdr, out_vcf_rec, allele_str.data());
-                    bcf_update_id(out_vcf_hdr, out_vcf_rec, x.id.data());
-                    bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &x.ac, 1);
-                    bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &x.rc, 1);
-                    int32_t gts[2];
-                    if (args.thres >= 0) {
-                        if (x.rc >= x.ac) {
-                            gts[0] = bcf_gt_phased(0);
-                            gts[1] = bcf_gt_phased(0);
-                        } else {
-                            gts[0] = bcf_gt_phased(1);
-                            gts[1] = bcf_gt_phased(1);
-                        }
-                    } else {
-                        gts[0] = bcf_gt_missing;
-                        gts[1] = bcf_gt_missing;
-                    }
-                    bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 2);
-                    bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
-                    bcf_clear(out_vcf_rec);
+                // print a genotype if the threshold is met, otherwise print unknown genotype
+                out_vcf_rec->rid = bcf_hdr_name2id(out_vcf_hdr, vs.first.data());
+                out_vcf_rec->pos = v.first;
+                out_vcf_rec->rlen = x.ref.size();
+                std::string allele_str(x.ref + "," + x.alt);
+                bcf_update_alleles_str(out_vcf_hdr, out_vcf_rec, allele_str.data());
+                bcf_update_id(out_vcf_hdr, out_vcf_rec, x.id.data());
+                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &x.ac, 1);
+                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &x.rc, 1);
+                int32_t gts[1];
+                if (args.gt && std::abs(x.rc - x.ac) >= args.thres) {
+                    if ((x.ac && args.thres < 0) || x.rc < x.ac) {
+                        gts[0] = bcf_gt_phased(1);
+                    } else { // we default to 0 in the case of a tie and thres==0
+                        gts[0] = bcf_gt_phased(0);
+                    } 
+                } else {
+                    gts[0] = bcf_gt_missing;
                 }
+                bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 1);
+                bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
+                bcf_clear(out_vcf_rec);
             }
         }
     }
@@ -240,34 +236,82 @@ void vcnt::varcount(const vcnt::VcntArgs& args) {
     bcf_close(vcf_fp);
 }
 
+void print_help() {
+fprintf(stderr, 
+"Description: \n\
+\n\
+Given a VCF and SAM file, calculate the alignment coverage over each ALT and\n\
+REF allele in the VCF. Outputs in VCF format to stdout.\n\n\
+Usage:\n\
+\n\
+./varcount [options] <vcf> <sam>\n\
+\n\
+<vcf>=STR               [bv]cf file name (required)\n\
+<sam>=STR               [bs]sam file name (required)\n\
+-s/--sample-name=STR    sample name in VCF output\n\
+                        (default: sample)\n\
+-g/--gt                 'predict' a genotype in the GT field based on threshold (-c/--threshold)\n\
+-c/--threshold=NUM      Requires -g/--gt. when NUM < 0: GT=1 if ALT >= 1.\n\
+                        when NUM >= 0: GT=1 if ALT-REF >= NUM; GT=0 if REF-ALT >= NUM; GT='.' otherwise.\n\
+                        (note: if NUM == 0 and REF == ALT, GT=0).\n\
+                        (default: 0)\n\
+-h/--help               print this help message\n\
+\n");
+}
+
 int main(int argc, char** argv) {
-    if (argc < 5) {
-        fprintf(stderr, "varcount\n========\n\n");
-        fprintf(stderr, 
-"description: given a V/BCF file and a S/BAM file, outputs a VCF with\n\
-    INFO/REFCOUNT and INFO/ALTCOUNT fields such that INFO/REFCOUNT is the count\n\
-    of alignments covering the ref allele and INFO/ALTCOUNT is the count of\n\
-    alignments covering the alt allele. \n\
-    Optionally, output a genotype based on a given threshold for the difference\n\
-    between the alt and ref count\n\
-\n\
-usage: ./varcount <vcf> <sam> <sample_name> <threshold>\n\
-        <vcf>: [bv]cf file name\n\
-        <sam>: [bs]sam file name\n\
-        <sample_name>: sample name in VCF output\n\
-        <threshold>: threshold of difference between ref and alt count to 'predict' genotype\n\
-            threshold>=0: ref/alt chosen if coverage exceeds the other allele\n\
-            by more than threshold. a tie defaults to ref\n\
-            threshold<0 : all variants and their counts are output, and genotypes are undefined\n\
-\n\
-output: a VCF (to stdout) with INFO/REFCOUNT, INFO/ALTCOUNT, and\n\
-    FORMAT/GT fields for the sample 'sample_name'\n");
+    vcnt::VcntArgs args;
+    static struct option long_options[] {
+        {"sample-name", required_argument, 0, 's'},
+        {"threshold", required_argument, 0, 'c'},
+        {"gt", no_argument, &args.gt, 1},
+        {"help", no_argument, 0, 'h'},
+        {0,0,0,0}
+    };
+
+    int ch;
+    int argpos = 0;
+    while ( (ch = getopt_long(argc, argv, "-:s:c:gh", long_options, NULL)) != -1 ) {
+        switch(ch) {
+            case 0:
+                break;
+            case 1:
+                if (argpos == 0) args.vcf_fname = std::string(optarg);
+                else if (argpos == 1) args.sam_fname = std::string(optarg);
+                else fprintf(stderr, "ignoring argument %s\n", optarg);
+                ++argpos;
+                break;
+            case 2:
+                break;
+            case 's':
+                args.sample_name = std::string(optarg);
+                break;
+            case 'c':
+                args.thres = std::atoi(optarg);
+                break;
+            case 'g':
+                args.gt = 1;
+                break;
+            case 'h':
+                print_help();
+                exit(0);
+                break;
+            case '?':
+                print_help();
+                fprintf(stderr, "error: unknown option -%c\n", optopt);
+                exit(1);
+                break;
+            default:
+                print_help();
+                exit(1);
+        }
+    }
+
+    if (args.vcf_fname == "" || args.sam_fname == "") {
+        print_help();
+        fprintf(stderr, "error: vcf and sam are mandatory arguments\n");
         exit(1);
     }
-    vcnt::VcntArgs args;
-    args.vcf_fname = std::string(argv[1]);
-    args.sam_fname = std::string(argv[2]);
-    args.sample_name = std::string(argv[3]);
-    args.thres = std::atoi(argv[4]);
+
     vcnt::varcount(args);
 }

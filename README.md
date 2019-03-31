@@ -12,25 +12,22 @@
 ## Description and Usage: 
 
 ```
-varcount
-========
+Description:
 
-description: given a V/BCF file and a S/BAM file, outputs a VCF with
-    INFO/REFCOUNT and INFO/ALTCOUNT fields such that INFO/REFCOUNT is the count
-    of alignments covering the ref allele and INFO/ALTCOUNT is the count of
-    alignments covering the alt allele. 
-    Optionally, output a genotype based on a given threshold for the difference
-    between the alt and ref count
+Given a VCF and SAM file, calculate the alignment coverage over each ALT and
+REF allele in the VCF. Outputs in VCF format to stdout.n\
+Usage:
 
-usage: ./varcount <vcf> <sam> <sample_name> <threshold>
-        <vcf>: [bv]cf file name
-        <sam>: [bs]sam file name
-        <sample_name>: sample name in VCF output
-        <threshold>: threshold of difference between ref and alt count to 'predict' genotype
-            threshold>=0: ref/alt chosen if coverage exceeds the other allele
-            by more than threshold. a tie defaults to ref
-            threshold<0 : all variants and their counts are output, and genotypes are undefined
+./varcount [options] <vcf> <sam>
 
-output: a VCF (to stdout) with INFO/REFCOUNT, INFO/ALTCOUNT, and\n\
-    FORMAT/GT fields for the sample 'sample_name'\n");
+<vcf>=STR               [bv]cf file name (required)
+<sam>=STR               [bs]sam file name (required)
+-s/--sample-name=STR    sample name in VCF output
+                        (default: sample)
+-g/--gt                 'predict' a genotype in the GT field based on threshold (-c/--threshold)
+-c/--threshold=NUM      Requires -g/--gt. when NUM < 0: GT=1 if ALT >= 1.
+                        when NUM >= 0: GT=1 if ALT-REF >= NUM; GT=0 if REF-ALT >= NUM; GT='.' otherwise.
+                        (note: if NUM == 0 and REF == ALT, GT=0).
+                        (default: 0)
+-h/--help               print this help message
 ```

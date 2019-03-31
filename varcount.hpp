@@ -44,8 +44,9 @@ namespace vcnt {
     struct VcntArgs {
         std::string vcf_fname = "";
         std::string sam_fname = "";
-        std::string sample_name = "";
+        std::string sample_name = "sample";
         int thres = 0;
+        int gt = 0;
     };
 
     using VarList = std::vector<Var>;
