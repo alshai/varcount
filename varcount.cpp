@@ -21,7 +21,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
         std::vector<MDPos> mds = md_parse(md);
         for (auto m: mds) {
             if (m.st == MD_DEL) {
-                std::string ref = "X"; // place holder for that extra base we have to account for in a deletion
+                std::string ref = "";
                 ref += m.str;
                 dels.push_back(std::pair<std::string, int32_t>(ref, aln->core.pos + m.p - 1));
             }
@@ -63,7 +63,7 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
                 if (d == rpos - 1) {
                     std::string alt = "";
                     alt += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos - 1)];
-                    vs.push_back(Var(d, VTYPE::V_DEL, alt, it->first));
+                    vs.push_back(Var(d, VTYPE::V_DEL, alt, alt + it->first));
                     it = dels.erase(it);
                 } else ++it;
             }
@@ -71,7 +71,6 @@ vcnt::VarList vcnt::bam_to_vars(bam1_t* aln) {
         rpos += rlen;
         qpos += qlen;
     }
-    std::sort(vs.begin(), vs.end()); // we probably don't need to sort
     return vs;
 }
 
@@ -90,13 +89,15 @@ vcnt::VarList vcnt::bcf_to_vars(bcf1_t* b) {
             vs.push_back(Var(b->pos, VTYPE::V_SNP, alt, ref, b->d.id)); // don't need ref here
         }
     }
+    vs[0].rec_start = 1;
     return vs;
 }
 
 void print_varlist(vcnt::VarList vs, FILE* out) {
-    for (auto v: vs) {
-        fprintf(out, "(%d %d %s %s", v.pos, v.type, v.alt.data(), v.ref.data());
+    for (const auto& v: vs) {
+        fprintf(out, "(%d %d %s %s", v.pos, static_cast<int>(v.type), v.alt.data(), v.ref.data());
         if (v.id.size()) fprintf(out, " %s", v.id.data());
+        if (v.rc + v.ac) fprintf(out, " %d %d", v.rc, v.ac);
         fprintf(out, ") ");
     } fprintf(out, "\n");
 }
@@ -157,16 +158,29 @@ void vcnt::varcount(const VcntArgs& args) {
             pid = c->tid;
 
             VarList aln_vars(bam_to_vars(aln));
+            if (args.verbose) {
+                fprintf(stderr, "a %s ", bam_get_qname(aln));
+                print_varlist(aln_vars, stderr);
+            }
             // can we vectorize or at least parallelize this? would it be worth it?
             // as of now, the performance bottleneck is the VCF reading
             for (int32_t i = c->pos; i <= bam_endpos(aln); ++i) {
                 auto found = vmap->find(i);
                 if (found != vmap->end()) {
+                    Var* v_cached = &found->second[0];
                     for (auto&& vv: found->second) {
-                        for (const auto& av: aln_vars) {
-                            if (vv == av) vv.ac += 1;
-                            else vv.rc += 1;
-                        }
+                        if (vv.rec_start) // keep pointer to this record
+                            v_cached = &vv;
+                        if (aln_vars.size()) {
+                            for (const auto& av: aln_vars) {
+                                if (var_match(vv, av)) v_cached->ac += 1;
+                                else v_cached->rc += 1;
+                            }
+                        } else v_cached->rc +=1;
+                    }
+                    if (args.verbose) {
+                        fprintf(stderr, "v %s ", bam_get_qname(aln));
+                        print_varlist(found->second, stderr);
                     }
                 }
             }
@@ -202,29 +216,40 @@ void vcnt::varcount(const VcntArgs& args) {
     // TODO: sort the output!
     for (const auto& vs: contig2vars) { // vs: {seq, map}
         for (const auto& v: vs.second)  { // v: {pos, Varlist}
-            for (const auto& x: v.second) { // x: {Var}
-                // print a genotype if the threshold is met, otherwise print unknown genotype
+            auto it = v.second.begin();
+            while (it != v.second.end()) {
+                std::string allele_str(it->ref + "," + it->alt);
+                auto nit = std::next(it);
+                while (nit != v.second.end() && !nit->rec_start) {
+                    allele_str += "," + nit->alt;
+                    ++nit;
+                }
                 out_vcf_rec->rid = bcf_hdr_name2id(out_vcf_hdr, vs.first.data());
-                out_vcf_rec->pos = v.first;
-                out_vcf_rec->rlen = x.ref.size();
-                std::string allele_str(x.ref + "," + x.alt);
+                out_vcf_rec->pos = it->pos;
+                out_vcf_rec->rlen = it->ref.size();
                 bcf_update_alleles_str(out_vcf_hdr, out_vcf_rec, allele_str.data());
-                bcf_update_id(out_vcf_hdr, out_vcf_rec, x.id.data());
-                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &x.ac, 1);
-                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &x.rc, 1);
+                bcf_update_id(out_vcf_hdr, out_vcf_rec, it->id.data());
+                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &(it->ac), 1);
+                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->rc), 1);
                 int32_t gts[1];
-                if (args.gt && std::abs(x.rc - x.ac) >= args.thres) {
-                    if ((x.ac && args.thres < 0) || x.rc < x.ac) {
-                        gts[0] = bcf_gt_phased(1);
-                    } else { // we default to 0 in the case of a tie and thres==0
-                        gts[0] = bcf_gt_phased(0);
-                    } 
+                if (args.gt) {
+                    if (std::abs(it->rc - it->ac) >= args.thres) {
+                        if ((it->ac && args.thres < 0) || it->rc < it->ac) {
+                            gts[0] = bcf_gt_phased(1);
+                        } else { // we default to 0 in the case of a tie and thres==0
+                            gts[0] = bcf_gt_phased(0);
+                        }
+                    } else if (args.keep) {
+                        gts[0] = bcf_gt_missing;
+                    }
                 } else {
                     gts[0] = bcf_gt_missing;
                 }
                 bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 1);
                 bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
                 bcf_clear(out_vcf_rec);
+
+                it = nit;
             }
         }
     }
@@ -237,7 +262,7 @@ void vcnt::varcount(const VcntArgs& args) {
 }
 
 void print_help() {
-fprintf(stderr, 
+fprintf(stderr,
 "Description: \n\
 \n\
 Given a VCF and SAM file, calculate the alignment coverage over each ALT and\n\
@@ -255,6 +280,8 @@ Usage:\n\
                         when NUM >= 0: GT=1 if ALT-REF >= NUM; GT=0 if REF-ALT >= NUM; GT='.' otherwise.\n\
                         (note: if NUM == 0 and REF == ALT, GT=0).\n\
                         (default: 0)\n\
+-k/--keep               if threshold not met, print record anyway with undefined genotype\n\
+-v/--verbose            prints detailed logging information to stderr\n\
 -h/--help               print this help message\n\
 \n");
 }
@@ -264,14 +291,16 @@ int main(int argc, char** argv) {
     static struct option long_options[] {
         {"sample-name", required_argument, 0, 's'},
         {"threshold", required_argument, 0, 'c'},
-        {"gt", no_argument, &args.gt, 1},
+        {"genotype", no_argument, &args.gt, 1},
+        {"keep", no_argument, &args.keep, 1},
+        {"verbose", no_argument, &args.verbose, 1},
         {"help", no_argument, 0, 'h'},
         {0,0,0,0}
     };
 
     int ch;
     int argpos = 0;
-    while ( (ch = getopt_long(argc, argv, "-:s:c:gh", long_options, NULL)) != -1 ) {
+    while ( (ch = getopt_long(argc, argv, "-:s:c:gvkh", long_options, NULL)) != -1 ) {
         switch(ch) {
             case 0:
                 break;
@@ -291,6 +320,12 @@ int main(int argc, char** argv) {
                 break;
             case 'g':
                 args.gt = 1;
+                break;
+            case 'k':
+                args.keep = 1;
+                break;
+            case 'v':
+                args.verbose = 1;
                 break;
             case 'h':
                 print_help();
