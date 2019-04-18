@@ -12,10 +12,10 @@
 ## Description and Usage: 
 
 ```
-Description:
+Description: 
 
 Given a VCF and SAM file, calculate the alignment coverage over each ALT and
-REF allele in the VCF. Outputs in VCF format to stdout.n\
+REF allele in the VCF. Outputs in VCF format to stdout.
 Usage:
 
 ./varcount [options] <vcf> <sam>
@@ -29,5 +29,7 @@ Usage:
                         when NUM >= 0: GT=1 if ALT-REF >= NUM; GT=0 if REF-ALT >= NUM; GT='.' otherwise.
                         (note: if NUM == 0 and REF == ALT, GT=0).
                         (default: 0)
+-k/--keep               if threshold not met, print record anyway with undefined genotype
+-v/--verbose            prints detailed logging information to stderr
 -h/--help               print this help message
 ```
