@@ -171,12 +171,11 @@ void vcnt::varcount(const VcntArgs& args) {
                     for (auto&& vv: found->second) {
                         if (vv.rec_start) // keep pointer to this record
                             v_cached = &vv;
-                        if (aln_vars.size()) {
-                            for (const auto& av: aln_vars) {
-                                if (var_match(vv, av)) v_cached->ac += 1;
-                                else v_cached->rc += 1;
-                            }
-                        } else v_cached->rc +=1;
+                        bool x = 0;
+                        for (const auto& av: aln_vars) {
+                            x = var_match(vv, av);
+                        }
+                        x ? ++(v_cached->rc) : ++(v_cached->ac);
                     }
                     if (args.verbose) {
                         fprintf(stderr, "v %s ", bam_get_qname(aln));
