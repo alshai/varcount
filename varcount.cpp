@@ -175,7 +175,7 @@ void vcnt::varcount(const VcntArgs& args) {
                         for (const auto& av: aln_vars) {
                             x = var_match(vv, av);
                         }
-                        x ? ++(v_cached->rc) : ++(v_cached->ac);
+                        x ? ++(v_cached->ac) : ++(v_cached->rc);
                     }
                     if (args.verbose) {
                         fprintf(stderr, "v %s ", bam_get_qname(aln));

@@ -37,7 +37,7 @@ namespace vcnt {
             case VTYPE::V_DEL:
                 return lv.pos == rv.pos && truncate_str_pair(lv.alt, lv.ref) == truncate_str_pair(rv.alt, rv.ref);
             case VTYPE::V_SNP:
-                return lv.pos == rv.pos && lv.alt == lv.ref;
+                return lv.pos == rv.pos && lv.alt == rv.alt;
             default:
                 fprintf(stderr, "no support for non SNPs & INDELs yet\n");
                 return false;
