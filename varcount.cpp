@@ -173,7 +173,7 @@ void vcnt::varcount(const VcntArgs& args) {
                             v_cached = &vv;
                         bool x = 0;
                         for (const auto& av: aln_vars) {
-                            x = var_match(vv, av);
+                            x |= var_match(vv, av);
                         }
                         x ? ++(v_cached->ac) : ++(v_cached->rc);
                     }
