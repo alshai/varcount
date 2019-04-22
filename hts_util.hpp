@@ -6,8 +6,9 @@
 #include <cstdio> 
 #include <vector>
 #include <string>
+#include "flat_hash_map.hpp"
 
-namespace vcnt {
+namespace hts_util {
     enum class VTYPE {V_UNK, V_SNP, V_INS, V_DEL};
 
     struct Var {
@@ -29,7 +30,7 @@ namespace vcnt {
         return std::forward_as_tuple(s1.substr(s1.size()-1), s2.substr(s1.size()-1));
     }
 
-    bool var_match(const Var& lv, const Var& rv) {
+    inline bool var_match(const Var& lv, const Var& rv) {
         if (lv.type != rv.type) return false;
         switch (lv.type) {
             case VTYPE::V_INS:
@@ -44,43 +45,16 @@ namespace vcnt {
         }
     }
 
-    /* // overloading "==" is probably irresponsible, so see is_same_var() function above
-    inline bool operator==(const Var& l, const Var& r) {
-        if (l.type == VTYPE::V_DEL || r.type == VTYPE::V_DEL) {
-            std::string s1 = l.ref.substr(1), s2 = r.ref.substr(1);
-            return std::tie(l.pos, l.type, l.alt, s1) == std::tie(r.pos, r.type, r.alt, s2);
-        } else {
-            return std::tie(l.pos, l.type, l.alt, l.ref) == std::tie(r.pos, r.type, r.alt, r.ref);
-        }
-    }
-
-    inline bool operator<(const Var& l, const Var& r) {
-        if (l.type == VTYPE::V_DEL || r.type == VTYPE::V_DEL) {
-            std::string s1 = l.ref.substr(1), s2 = r.ref.substr(1);
-            return std::tie(l.pos, l.type, l.alt, s1) < std::tie(r.pos, r.type, r.alt, s2);
-        } else {
-            return std::tie(l.pos, l.type, l.alt, l.ref) < std::tie(r.pos, r.type, r.alt, r.ref);
-        }
-    }
-    */
-
-    struct VcntArgs {
-        std::string vcf_fname = "";
-        std::string sam_fname = "";
-        std::string sample_name = "sample";
-        int thres = 0;
-        int gt = 0;
-        int keep = 0;
-        int verbose = 0;
-    };
-
     using VarList = std::vector<Var>;
     using pos2var_map = ska::flat_hash_map< int32_t, VarList >;
     using contig2map_map = ska::flat_hash_map<std::string, pos2var_map>;
 
+    contig2map_map bcf_to_map(vcfFile* vcf_fp, bcf_hdr_t* vcf_hdr);
+
     VarList bam_to_vars(bam1_t* a);
     VarList bcf_to_vars(bcf1_t* b);
-    void varcount(const VcntArgs& args);
+
+    void print_varlist(VarList vs, FILE* out);
 };
 
 #endif // VARCOUNT_HPP
