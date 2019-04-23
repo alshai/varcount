@@ -34,17 +34,6 @@ namespace hts_util {
     };
 
 
-    struct VarGT {
-        template<typename Ts>
-        Var(int32_t p, VTYPE t, std::string a, std::string r, std::string i, int g, Ts&&...) : pos(p), type(t), alt(a), ref(r), id(i) , gt(g){}
-        int32_t pos = 0;
-        VTYPE type = VTYPE::V_UNK;
-        std::string alt = "";
-        std::string ref = "";
-        std::string id = ""; 
-        int gt = 0;
-    };
-
 
     // trims s1.size()-1 characters from prefix of s1, s2 
     static inline std::tuple<std::string,std::string> truncate_str_pair(const std::string& s1, const std::string& s2) {
@@ -75,8 +64,15 @@ namespace hts_util {
 
     // might encounter bug if STRLEN(REF) > 1 && STRLEN(ALT) > 1
     template <typename T>
-    std::vector<T> bcf_to_vars(bcf1_t* b) {
+    std::vector<T> bcf_to_vars(bcf_hdr_t hdr, bcf1_t* b) {
         std::vector<T> vs;
+        return vs;
+    }
+    
+    template <>
+    std::vector<Var> bcf_to_vars(bcf_hdr_t hdr, bcf1_t* b) {
+        (void) hdr;
+        std::vector<Var> vs;
         char* ref = b->d.allele[0];
         for (uint32_t i = 1; i < b->n_allele; ++i) {
             char* alt = b->d.allele[i];
@@ -182,7 +178,7 @@ namespace hts_util {
                 }
                 vs.clear();
             }
-            std::vector<T> more_vs = bcf_to_vars<T>(vcf_rec);
+            std::vector<T> more_vs = bcf_to_vars<T>(vcf_hdr, vcf_rec);
             vs.insert(vs.end(), more_vs.begin(), more_vs.end());
             ppos = vcf_rec->pos;
             pid = vcf_rec->rid;
