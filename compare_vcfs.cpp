@@ -25,14 +25,16 @@ int get_first_genotype(bcf_hdr_t* hdr, bcf1_t* b) {
     return bcf_gt_allele(gt_arr[0]);
 }
 
+namespace hts_util {
 template <>
-std::vector<VarGT> hts_util::bcf_to_vars(bcf_hdr_t* hdr, bcf1_t* b) {
+std::vector<VarGT> bcf_to_vars(bcf_hdr_t* hdr, bcf1_t* b) {
     std::vector<VarGT> vs;
     // get the first genotype
     int gt = get_first_genotype(hdr, b);
     vs.push_back(VarGT(b->pos, b->d.id, gt));
     return vs;
 }
+};
 
 
 void compare_vcfs(CmpVcfArgs args) {
@@ -73,6 +75,7 @@ void compare_vcfs(CmpVcfArgs args) {
                     } else if (gt > 0) {
                         gt == v.gt ? ++tps : ++fps;
                     }
+                    found = true;
                     break;
                 } else found = false;
             }

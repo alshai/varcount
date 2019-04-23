@@ -1,5 +1,5 @@
 CXX=g++
-CXX_FLAGS=--std=c++11 -O3 -Wall -Wextra
+CXX_FLAGS=-std=c++11 -O3 -Wall -Wextra
 
 LIBS=-lhts
 CPP=$(wildcard *.cpp)
