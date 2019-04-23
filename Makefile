@@ -5,9 +5,12 @@ LIBS=-lhts
 CPP=$(wildcard *.cpp)
 OBJ=$(CPP:%.cpp=%.o)
 
-all: varcount 
+all: varcount compare_vcfs
 
 varcount: varcount.o hts_util.hpp
+	$(CXX) $(CXX_FLAGS) $^ -o $@ $(LIBS)
+
+compare_vcfs: compare_vcfs.o hts_util.hpp
 	$(CXX) $(CXX_FLAGS) $^ -o $@ $(LIBS)
 
 test: test.o hts_util.hpp
