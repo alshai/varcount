@@ -64,13 +64,13 @@ namespace hts_util {
 
     // might encounter bug if STRLEN(REF) > 1 && STRLEN(ALT) > 1
     template <typename T>
-    std::vector<T> bcf_to_vars(bcf_hdr_t hdr, bcf1_t* b) {
+    std::vector<T> bcf_to_vars(bcf_hdr_t* hdr, bcf1_t* b) {
         std::vector<T> vs;
         return vs;
     }
     
     template <>
-    std::vector<Var> bcf_to_vars(bcf_hdr_t hdr, bcf1_t* b) {
+    std::vector<Var> bcf_to_vars(bcf_hdr_t* hdr, bcf1_t* b) {
         (void) hdr;
         std::vector<Var> vs;
         char* ref = b->d.allele[0];
