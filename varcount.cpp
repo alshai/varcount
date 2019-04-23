@@ -28,11 +28,11 @@ void varcount(const VcntArgs& args) {
     bcf_hdr_t* vcf_hdr = bcf_hdr_read(vcf_fp);
     bcf_hdr_set_samples(vcf_hdr, NULL, 0); // no genotypes needed here
 
-    hts_util::contig2map_map contig2vars(hts_util::bcf_to_map(vcf_fp, vcf_hdr));
+    hts_util::contig2map_map<hts_util::Var> contig2vars(hts_util::bcf_to_map(vcf_fp, vcf_hdr));
 
     int32_t pid = -1;
     bam1_core_t* c = nullptr;
-    hts_util::pos2var_map* vmap = nullptr;
+    hts_util::pos2var_map<hts_util::Var>* vmap = nullptr;
     while (sam_read1(sam_fp, sam_hdr, aln) >= 0) {
         c = &aln->core;
         // we only care about uniquely mapped reads
@@ -44,7 +44,7 @@ void varcount(const VcntArgs& args) {
             }
             pid = c->tid;
 
-            hts_util::VarList aln_vars(hts_util::bam_to_vars(aln));
+            std::vector<hts_util::Var> aln_vars(hts_util::bam_to_vars(aln));
             if (args.verbose) {
                 fprintf(stderr, "a %s ", bam_get_qname(aln));
                 hts_util::print_varlist(aln_vars, stderr);
