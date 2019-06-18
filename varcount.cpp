@@ -15,6 +15,7 @@ struct VcntArgs {
     int gt = 0;
     int keep = 0;
     int verbose = 0;
+    int diploid = 0;
 };
 
 void varcount(const VcntArgs& args);
@@ -79,7 +80,6 @@ void varcount(const VcntArgs& args) {
 
 
     // output in VCF format!!
-    // std::string out_fname = args.sample_name + ".vcf";
     vcfFile* out_vcf_fp = bcf_open("-", "w");
     bcf_hdr_t* out_vcf_hdr = bcf_hdr_dup(vcf_hdr);
 
@@ -117,21 +117,30 @@ void varcount(const VcntArgs& args) {
                 bcf_update_id(out_vcf_hdr, out_vcf_rec, it->id.data());
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &(it->ac), 1);
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->rc), 1);
-                int32_t gts[1];
+                int32_t gt = 0;
                 if (args.gt) {
                     if (std::abs(it->rc - it->ac) >= args.thres) {
                         if ((it->ac && args.thres < 0) || it->rc < it->ac) {
-                            gts[0] = bcf_gt_phased(1);
+                            gt = bcf_gt_phased(1);
                         } else { // we default to 0 in the case of a tie and thres==0
-                            gts[0] = bcf_gt_phased(0);
+                            gt = bcf_gt_phased(0);
                         }
                     } else if (args.keep) {
-                        gts[0] = bcf_gt_missing;
+                        gt = bcf_gt_missing;
                     }
                 } else {
-                    gts[0] = bcf_gt_missing;
+                    gt = bcf_gt_missing;
                 }
-                bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 1);
+                if (args.diploid) {
+                    int32_t gts[2];
+                    gts[0] = gt;
+                    gts[1] = bcf_gt_phased(bcf_gt_missing);
+                    bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 2);
+                } else {
+                    int32_t gts[1];
+                    gts[0] = gt;
+                    bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 1);
+                }
                 bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
                 bcf_clear(out_vcf_rec);
 
@@ -178,6 +187,7 @@ int main(int argc, char** argv) {
         {"threshold", required_argument, 0, 'c'},
         {"genotype", no_argument, &args.gt, 1},
         {"keep", no_argument, &args.keep, 1},
+        {"diploid", no_argument, &args.diploid, 'd'},
         {"verbose", no_argument, &args.verbose, 1},
         {"help", no_argument, 0, 'h'},
         {0,0,0,0}
@@ -185,7 +195,7 @@ int main(int argc, char** argv) {
 
     int ch;
     int argpos = 0;
-    while ( (ch = getopt_long(argc, argv, "-:s:c:gvkh", long_options, NULL)) != -1 ) {
+    while ( (ch = getopt_long(argc, argv, "-:s:c:dgvkh", long_options, NULL)) != -1 ) {
         switch(ch) {
             case 0:
                 break;
@@ -202,6 +212,9 @@ int main(int argc, char** argv) {
                 break;
             case 'c':
                 args.thres = std::atoi(optarg);
+                break;
+            case 'd':
+                args.diploid = true;
                 break;
             case 'g':
                 args.gt = 1;
