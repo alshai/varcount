@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 
 project(varcount CXX C)
 
-set(PROJECT_URL "https://github.com/alshai/liftover")
+set(PROJECT_URL "https://github.com/alshai/varcount")
 set(PROJECT_DESCRIPTION "Outputs alignment coverage over a predefined set of variants")
 set(CMAKE_CXX_STANDARD 11)
 
