@@ -15,3 +15,5 @@ target_link_libraries(varcount ${PKG_HTSLIB_LDFLAGS})
 
 add_executable(compare_vcfs compare_vcfs.cpp hts_util.hpp)
 target_link_libraries(compare_vcfs ${PKG_HTSLIB_LDFLAGS})
+
+INSTALL(TARGETS varcount compare_vcfs DESTINATION bin)
