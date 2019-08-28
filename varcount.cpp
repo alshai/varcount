@@ -127,7 +127,7 @@ void varcount(const VcntArgs& args) {
                         }
                     } else if (args.keep) {
                         gt = bcf_gt_missing;
-                    }
+                    } 
                 } else {
                     gt = bcf_gt_missing;
                 }
@@ -141,7 +141,9 @@ void varcount(const VcntArgs& args) {
                     gts[0] = gt;
                     bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 1);
                 }
-                bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
+                if (args.keep || !bcf_gt_is_missing(gt)) {
+                    bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
+                }
                 bcf_clear(out_vcf_rec);
 
                 it = nit;
