@@ -47,7 +47,7 @@ void varcount(const VcntArgs& args) {
             }
             pid = c->tid;
 
-            std::vector<hts_util::Var> aln_vars(hts_util::bam_to_vars(aln));
+            std::vector<hts_util::Var> aln_vars(hts_util::Var::from_bam(aln));
             if (args.verbose) {
                 fprintf(stderr, "a %s ", bam_get_qname(aln));
                 hts_util::print_varlist(aln_vars, stderr);
@@ -63,7 +63,7 @@ void varcount(const VcntArgs& args) {
                             v_cached = &vv;
                         bool x = 0;
                         for (const auto& av: aln_vars) {
-                            x |= hts_util::var_match(vv, av);
+                            x |= hts_util::Var::match(vv, av);
                         }
                         x ? ++(v_cached->ac) : ++(v_cached->rc);
                     }
