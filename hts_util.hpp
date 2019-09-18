@@ -15,11 +15,6 @@
 namespace hts_util {
     enum class VTYPE {V_UNK, V_SNP, V_INS, V_DEL};
 
-    static inline std::tuple<std::string,std::string> truncate_str_pair(const std::string& s1, const std::string& s2) {
-        return std::forward_as_tuple(s1.substr(s1.size()-1), s2.substr(s1.size()-1));
-    }
-
-
     struct Var {
         template<typename Ts>
         Var(int32_t p, VTYPE t, std::string a, std::string r, std::string i, Ts&&...) : pos(p), type(t), alt(a), ref(r), id(i) {}
@@ -115,21 +110,6 @@ namespace hts_util {
                 qpos += qlen;
             }
             return vs;
-        }
-
-        static inline bool match(const Var& lv, const Var& rv) {
-            if (lv.type != rv.type) return false;
-            switch (lv.type) {
-                case VTYPE::V_INS:
-                    return lv.pos+static_cast<int32_t>(lv.ref.size())-1 == rv.pos && truncate_str_pair(lv.ref, lv.alt) == truncate_str_pair(rv.ref, rv.alt) ;
-                case VTYPE::V_DEL:
-                    return lv.pos == rv.pos && truncate_str_pair(lv.alt, lv.ref) == truncate_str_pair(rv.alt, rv.ref);
-                case VTYPE::V_SNP:
-                    return lv.pos == rv.pos && lv.alt == rv.alt;
-                default:
-                    fprintf(stderr, "no support for non SNPs & INDELs yet\n");
-                    return false;
-            }
         }
 
     };
