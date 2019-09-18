@@ -16,6 +16,8 @@ struct VcntArgs {
     int keep = 0;
     int verbose = 0;
     int diploid = 0;
+    int alt_default = 0;
+    int min_ac = 0;
 };
 
 void varcount(const VcntArgs& args);
@@ -119,11 +121,17 @@ void varcount(const VcntArgs& args) {
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->rc), 1);
                 int32_t gt = 0;
                 if (args.gt) {
-                    if (std::abs(it->rc - it->ac) >= args.thres) {
-                        if ((it->ac && args.thres < 0) || it->rc < it->ac) {
+                    if (args.thres < 0 && it->ac) {
+                        gt = bcf_gt_phased(it->ac != 0);
+                    } else if (!it->ac && !it->rc) {
+                        gt = bcf_gt_missing;
+                    } else if (std::abs(it->rc - it->ac) >= args.thres) {
+                        if (it->rc < it->ac) {
                             gt = bcf_gt_phased(1);
-                        } else { // we default to 0 in the case of a tie and thres==0
+                        } else if (it->rc > it->ac)  {
                             gt = bcf_gt_phased(0);
+                        } else { // it->rc == it->ac
+                            gt = bcf_gt_phased(args.alt_default);
                         }
                     } else if (args.keep) {
                         gt = bcf_gt_missing;
@@ -134,14 +142,14 @@ void varcount(const VcntArgs& args) {
                 if (args.diploid) {
                     int32_t gts[2];
                     gts[0] = gt;
-                    gts[1] = bcf_gt_phased(bcf_gt_missing);
+                    gts[1] = gt; // TODO: actually predict a second genotype.
                     bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 2);
                 } else {
                     int32_t gts[1];
                     gts[0] = gt;
                     bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 1);
                 }
-                if (args.keep || !bcf_gt_is_missing(gt)) {
+                if (args.keep || (it->ac >= args.min_ac && !bcf_gt_is_missing(gt))) {
                     bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec);
                 }
                 bcf_clear(out_vcf_rec);
@@ -191,13 +199,15 @@ int main(int argc, char** argv) {
         {"keep", no_argument, &args.keep, 1},
         {"diploid", no_argument, &args.diploid, 'd'},
         {"verbose", no_argument, &args.verbose, 1},
+        {"alt-default", no_argument, &args.alt_default, 1},
+        {"min-alt-count", required_argument, 0, 'm'},
         {"help", no_argument, 0, 'h'},
         {0,0,0,0}
     };
 
     int ch;
     int argpos = 0;
-    while ( (ch = getopt_long(argc, argv, "-:s:c:dgvkh", long_options, NULL)) != -1 ) {
+    while ( (ch = getopt_long(argc, argv, "-:s:c:m:dgvkh", long_options, NULL)) != -1 ) {
         switch(ch) {
             case 0:
                 break;
@@ -214,6 +224,9 @@ int main(int argc, char** argv) {
                 break;
             case 'c':
                 args.thres = std::atoi(optarg);
+                break;
+            case 'm':
+                args.min_ac = std::atoi(optarg);
                 break;
             case 'd':
                 args.diploid = true;
