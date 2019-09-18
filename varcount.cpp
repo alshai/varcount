@@ -20,6 +20,27 @@ struct VcntArgs {
     int min_ac = 0;
 };
 
+static inline std::tuple<std::string,std::string> truncate_str_pair(const std::string& s1, const std::string& s2) {
+    return std::forward_as_tuple(s1.substr(s1.size()-1), s2.substr(s1.size()-1));
+}
+
+
+static inline bool var_match(const hts_util::Var& lv, const hts_util::Var& rv) {
+    if (lv.type != rv.type) return false;
+    switch (lv.type) {
+        case hts_util::VTYPE::V_INS:
+            return lv.pos+static_cast<int32_t>(lv.ref.size())-1 == rv.pos && truncate_str_pair(lv.ref, lv.alt) == truncate_str_pair(rv.ref, rv.alt) ;
+        case hts_util::VTYPE::V_DEL:
+            return lv.pos == rv.pos && truncate_str_pair(lv.alt, lv.ref) == truncate_str_pair(rv.alt, rv.ref);
+        case hts_util::VTYPE::V_SNP:
+            return lv.pos == rv.pos && lv.alt == rv.alt;
+        default:
+            fprintf(stderr, "no support for non SNPs & INDELs yet\n");
+            return false;
+    }
+}
+
+
 void varcount(const VcntArgs& args);
 
 void varcount(const VcntArgs& args) {
@@ -63,7 +84,7 @@ void varcount(const VcntArgs& args) {
                             v_cached = &vv;
                         bool x = 0;
                         for (const auto& av: aln_vars) {
-                            x |= hts_util::Var::match(vv, av);
+                            x |= var_match(vv, av);
                         }
                         x ? ++(v_cached->ac) : ++(v_cached->rc);
                     }
