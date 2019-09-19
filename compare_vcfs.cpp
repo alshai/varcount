@@ -10,84 +10,88 @@ struct CmpVcfArgs {
 };
 
 struct VarGT {
-    VarGT(int32_t p, std::string i, int g) : pos(p), id(i), gt(g) {}
+    VarGT(int32_t p,
+          std::string a, std::string r, 
+          int32_t g1, int32_t g2) : 
+        pos(p),
+        alt(a), ref(r), 
+        gt1(g1), gt2(g2) {}
     int32_t pos = 0;
-    std::string id = ""; 
-    int gt = 0;
+    std::string alt = "";
+    std::string ref = "";
+    int32_t gt1;
+    int32_t gt2;
+    // the following WON'T be used in comparators!
+    bool rec_start = 0;
+
+    static std::vector<VarGT> from_bcf(bcf_hdr_t* hdr, bcf1_t* b) {
+        std::vector<VarGT> vs;
+        char* ref = b->d.allele[0];
+        int ngt, gt1, gt2;
+        /* TODO: extract genotype from the hdr */
+        int32_t* gts = hts_util::get_genotype(hdr, b, &ngt);
+        gt1 = bcf_gt_allele(gts[0]);
+        gt2 = bcf_gt_allele(gts[1]);
+        if (ngt < 2) { fprintf(stderr, "error getting genotype!\n"); exit(1);}
+        for (uint32_t i = 1; i < b->n_allele; ++i) {
+            char* alt = b->d.allele[i];
+            if (alt[0] == '.') continue;
+            vs.push_back(VarGT(b->pos, alt, ref, gt1, gt2)); 
+        }
+        vs[0].rec_start = 1;
+        return vs;
+    }
 };
 
-
-int get_first_genotype(bcf_hdr_t* hdr, bcf1_t* b) {
-    int ngt;
-    int32_t *gt_arr = NULL, ngt_arr = 0;
-    ngt = bcf_get_genotypes(hdr, b, &gt_arr, &ngt_arr);
-    if (ngt <= 0) { return -1; }
-    return bcf_gt_allele(gt_arr[0]);
+static inline bool var_match(const VarGT& lv, const VarGT& rv) {
+    return lv.pos == rv.pos && lv.alt == rv.alt && lv.ref == rv.ref && lv.gt1 == rv.gt1 && lv.gt2 == rv.gt2;
 }
-
-namespace hts_util {
-template <>
-std::vector<VarGT> bcf_to_vars(bcf_hdr_t* hdr, bcf1_t* b) {
-    std::vector<VarGT> vs;
-    // get the first genotype
-    int gt = get_first_genotype(hdr, b);
-    vs.push_back(VarGT(b->pos, b->d.id, gt));
-    return vs;
-}
-};
-
 
 void compare_vcfs(CmpVcfArgs args) {
-    vcfFile* vcf_fp1 = bcf_open(args.fname1.data(), "r");
-    bcf_hdr_t* vcf_hdr1 = bcf_hdr_read(vcf_fp1);
-    bcf_hdr_set_samples(vcf_hdr1, args.sample1.data(), 0);
+    vcfFile* fp1 = bcf_open(args.fname1.data(), "r");
+    bcf_hdr_t* hdr1 = bcf_hdr_read(fp1);
+    bcf_hdr_set_samples(hdr1, args.sample1.data(), 0);
 
-    hts_util::contig2map_map<VarGT> contig2vars(hts_util::bcf_to_map<VarGT>(vcf_fp1, vcf_hdr1));
+    hts_util::contig2map_map<VarGT> contig2vars(hts_util::bcf_to_map<VarGT>(fp1, hdr1));
 
-    vcfFile* vcf_fp2 = bcf_open(args.fname2.data(), "r");
-    bcf_hdr_t* vcf_hdr2 = bcf_hdr_read(vcf_fp2);
-    bcf_hdr_set_samples(vcf_hdr2, args.sample2.data(), 0); // no genotypes needed here
-    bcf1_t* brec = bcf_init();
+    vcfFile* fp2 = bcf_open(args.fname2.data(), "r");
+    bcf_hdr_t* hdr2 = bcf_hdr_read(fp2);
+    bcf_hdr_set_samples(hdr2, args.sample2.data(), 0); // no genotypes needed here
+    bcf1_t* rec = bcf_init();
 
-    uint32_t fps = 0;
-    uint32_t fns = 0;
-    uint32_t tps = 0;
-    uint32_t tns = 0;
+    vcfFile* out_fp = bcf_open("-", "w");
+    bcf_hdr_t* out_hdr = bcf_hdr_dup(hdr2);
+    // print the header of fp2
+    bcf_hdr_write(out_fp, out_hdr);
+
     int32_t pid = -1;
     hts_util::pos2var_map<VarGT>* vmap = nullptr;
-    while (!bcf_read(vcf_fp2, vcf_hdr2, brec)) {
-        bcf_unpack(brec, BCF_UN_STR || BCF_UN_FMT);
-        if (brec->rid != pid) {
-            vmap = &(contig2vars[bcf_hdr_id2name(vcf_hdr2, brec->rid)]);
+    // We're going to assume one variant per line for both VCF files for now.
+    while (!bcf_read(fp2, hdr2, rec)) {
+        bcf_unpack(rec, BCF_UN_STR || BCF_UN_FMT);
+        auto vars2 = VarGT::from_bcf(hdr2, rec);
+        if (rec->rid != pid) {
+            vmap = &(contig2vars[bcf_hdr_id2name(hdr2, rec->rid)]);
         }
-        std::string id(brec->d.id);
-        int gt = get_first_genotype(vcf_hdr2, brec);
-        auto vars = vmap->find(brec->pos);
-        bool found = vars != vmap->end();
-        if (found) {
-            for (const auto& v: vars->second) {
-                // count missing genotypes as fps (if gt=0) or fns (if gt=1).
-                if (v.id == id) {
-                    if (gt < 0) {
-                        v.gt ? ++fns : ++fps;
-                    } else if (!gt) {
-                        gt == v.gt ? ++tns : ++fns;
-                    } else if (gt > 0) {
-                        gt == v.gt ? ++tps : ++fps;
+        std::string id(rec->d.id);
+        auto vars1_iter = vmap->find(rec->pos);
+        bool match = 0;
+        if (vars1_iter != vmap->end()) {
+            for (const auto& v2: vars2) {
+                for (const auto& v1: vars1_iter->second) {
+                    if (var_match(v1, v2)) {
+                        match = 1;
+                        break;
                     }
-                    found = true;
+                }
+                if (match) { // write record here
+                    bcf_write(out_fp, out_hdr, rec);
                     break;
-                } else found = false;
-            }
-        } 
-        if (!found && gt >= 0) { // genotyped but not in reference
-            gt ? ++fps : ++fns;
-        }
-
-        pid = brec->rid;
+                } 
+            } match = 0;
+        }  // not found
+        pid = rec->rid;
     }
-    fprintf(stderr, "tps\ttns\tfps\tfns\n");
-    fprintf(stdout, "%d\t%d\t%d\t%d\n", tps, tns, fps, fns);
 }
 
 void print_help() {

@@ -172,6 +172,13 @@ namespace hts_util {
             fprintf(out, ") ");
         } fprintf(out, "\n");
     }
+
+    int32_t* get_genotype(bcf_hdr_t* hdr, bcf1_t* rec, int* ngt) {
+        int32_t *gt_arr = NULL, ngt_arr = 0;
+        *ngt = bcf_get_genotypes(hdr, rec, &gt_arr, &ngt_arr);
+        if ( ngt<=0 ) return NULL; // GT not present
+        else return gt_arr;
+    }
 };
 
 #endif // VARCOUNT_HPP
