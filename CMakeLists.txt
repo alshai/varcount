@@ -13,7 +13,7 @@ pkg_search_module(PKG_HTSLIB REQUIRED htslib)
 add_executable(varcount varcount.cpp hts_util.hpp)
 target_link_libraries(varcount ${PKG_HTSLIB_LDFLAGS})
 
-# add_executable(compare_vcfs compare_vcfs.cpp hts_util.hpp)
-# target_link_libraries(compare_vcfs ${PKG_HTSLIB_LDFLAGS})
+add_executable(next_gt next_gt.cpp hts_util.hpp)
+target_link_libraries(next_gt ${PKG_HTSLIB_LDFLAGS})
 
 INSTALL(TARGETS varcount DESTINATION bin)
