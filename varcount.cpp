@@ -156,7 +156,7 @@ void varcount(const VcntArgs& args) {
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->ad[0]), 1);
                 if (args.gl) {
                     /* TODO: handle indels smarter. Use individual base qualities */
-                    auto pls = hts_util::get_pls_naive(it->ad[0], it->ad[1], ERROR_RATE);
+                    auto pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], ERROR_RATE);
                     bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "PL", pls.data(), 3);
                 }
                 int32_t gt = 0;

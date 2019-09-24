@@ -193,6 +193,21 @@ namespace hts_util {
         pls[2] = static_cast<int>( -10 * ((ac*std::log10(1-e)) + (rc*std::log(e))) );
         return pls;
     }
+
+    inline std::array<int32_t, 3> get_pls_naive_normalized(int32_t rc, int32_t ac, float e) {
+        std::array<int32_t, 3> pls;
+        pls[0] = static_cast<int32_t>( -10 * ((rc*std::log10(1-e)) + (ac*std::log(e))) );
+        pls[1] = static_cast<int32_t>( 10 * (rc + ac) * std::log10(2) );
+        pls[2] = static_cast<int32_t>( -10 * ((ac*std::log10(1-e)) + (rc*std::log(e))) );
+        int32_t min = pls[0];
+        for (int i = 1; i < 3; ++i) {
+            if (pls[i] < min) min = pls[i];
+        }
+        for (int i = 0; i < 3; ++i) {
+            pls[i] -= min;
+        }
+        return pls;
+    }
 };
 
 #endif // VARCOUNT_HPP
