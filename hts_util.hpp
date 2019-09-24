@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <vector>
+#include <array>
 #include <list>
 #include <string>
 #include <htslib/vcf.h>
@@ -26,8 +27,9 @@ namespace hts_util {
         std::string ref = "";
         // the following WON'T be used in comparators!
         std::string id = ""; 
-        int32_t rc = 0;
-        int32_t ac = 0;
+        std::array<int32_t, 2> ad;
+        // int32_t rc = 0;
+        // int32_t ac = 0;
         bool rec_start = 0;
 
         static std::vector<Var> from_bcf(bcf_hdr_t* hdr, bcf1_t* b) {
@@ -168,7 +170,7 @@ namespace hts_util {
         for (const auto& v: vs) {
             fprintf(out, "(%d %d %s %s", v.pos, static_cast<int>(v.type), v.alt.data(), v.ref.data());
             if (v.id.size()) fprintf(out, " %s", v.id.data());
-            if (v.rc + v.ac) fprintf(out, " %d %d", v.rc, v.ac);
+            if (v.ad[0] + v.ad[1]) fprintf(out, " %d %d", v.ad[0], v.ad[1]);
             fprintf(out, ") ");
         } fprintf(out, "\n");
     }
@@ -178,6 +180,18 @@ namespace hts_util {
         *ngt = bcf_get_genotypes(hdr, rec, &gt_arr, &ngt_arr);
         if ( ngt<=0 ) return NULL; // GT not present
         else return gt_arr;
+    }
+
+    /* input: ref allele read count, alt allele read count, uniform error rate
+     * output: genotype likelihood for ref/ref, ref/alt, alt/alt genotypes, resp.
+     * assumes uniform base qualities. Makes no distinction between SNPS and indels
+     */
+    inline std::array<int, 3> get_pls_naive(int rc, int ac, float e) {
+        std::array<int, 3> pls;
+        pls[0] = static_cast<int>( -10 * ((rc*std::log10(1-e)) + (ac*std::log(e))) );
+        pls[1] = static_cast<int>( 10 * (rc + ac) * std::log10(2) );
+        pls[2] = static_cast<int>( -10 * ((ac*std::log10(1-e)) + (rc*std::log(e))) );
+        return pls;
     }
 };
 
