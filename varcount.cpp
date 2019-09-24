@@ -13,12 +13,14 @@ struct VcntArgs {
     std::string vcf_fname = "";
     std::string sam_fname = "";
     std::string sample_name = "sample";
-    int thres = 0;
+    int thres = -1;
     int gt = 0;
     int keep = 0;
     int verbose = 0;
     int diploid = 0;
     int alt_default = 0;
+    int alt_sensitive = 0;
+    int homs_only = 0;
     int min_ac = 0;
     int gl = 0;
 };
@@ -44,7 +46,54 @@ static inline bool var_match(const hts_util::Var& lv, const hts_util::Var& rv) {
 }
 
 
-void varcount(const VcntArgs& args);
+std::array<int32_t, 2> gt_by_threshold(const VcntArgs& args, const hts_util::Var& v) {
+    std::array<int32_t, 2> gts;
+    gts[0] = bcf_gt_missing;
+    if (args.thres < 0 && v.ad[1]) {
+        gts[0] = bcf_gt_phased(v.ad[1] != 0);
+    } else if ((v.ad[1] || v.ad[0]) && std::abs(v.ad[0] - v.ad[1]) >= args.thres) {
+        if (v.ad[0] < v.ad[1]) {
+            gts[0] = bcf_gt_phased(1);
+        } else if (v.ad[0] > v.ad[1])  {
+            gts[0] = bcf_gt_phased(0);
+        } else { // v.ad[0] == v.ad[1]
+            gts[0] = bcf_gt_phased(args.alt_default);
+        }
+    } 
+    gts[1] = gts[0];
+    return gts;
+}
+
+std::array<int32_t, 2> gt_by_alt_evidence(const VcntArgs& args, const hts_util::Var& v) {
+    std::array<int32_t, 2> gts;
+    if (v.ad[1]) {
+        gts[0] = bcf_gt_phased(1); gts[1] = bcf_gt_phased(1);
+    } else if (v.ad[0]) {
+        gts[0] = bcf_gt_phased(0); gts[1] = bcf_gt_phased(0);
+    } else {
+        gts[0] = bcf_gt_missing; gts[1] = bcf_gt_missing;
+    }
+    return gts;
+}
+
+std::array<int32_t, 2> gt_by_likelihood(const VcntArgs& args, const std::array<int32_t, 3>& pls) {
+    std::array<int32_t, 2> gts;
+    int min = pls[0], minidx = 0;
+    if (pls[1] < min) { min = pls[1]; minidx = 1; }
+    if (pls[2] < min) { min = pls[2]; minidx = 2; }
+    switch (minidx) {
+        case 0:
+            gts[0] = bcf_gt_phased(0); gts[1] = bcf_gt_phased(0);
+            break;
+        case 1:
+            gts[0] = bcf_gt_unphased(1); gts[1] = bcf_gt_unphased(0);
+            break;
+        case 2:
+            gts[0] = bcf_gt_phased(1); gts[1] = bcf_gt_phased(1);
+            break;
+    }
+    return gts;
+}
 
 void varcount(const VcntArgs& args) {
     samFile* sam_fp = sam_open(args.sam_fname.data(), "r");
@@ -154,37 +203,27 @@ void varcount(const VcntArgs& args) {
                 bcf_update_id(out_vcf_hdr, out_vcf_rec, it->id.data());
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &(it->ad[1]), 1);
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->ad[0]), 1);
-                if (args.gl) {
+                std::array<int32_t, 3> pls;
+                std::array<int32_t, 2> gts;
+                if (args.gl || (args.gt && args.thres <= 0)) {
                     /* TODO: handle indels smarter. Use individual base qualities */
-                    auto pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], ERROR_RATE);
-                    bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "PL", pls.data(), 3);
+                    pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], ERROR_RATE);
                 }
-                int32_t gt = 0;
-                if (args.gt) {
-                    gt = bcf_gt_missing;
-                    if (args.thres < 0 && it->ad[1]) {
-                        gt = bcf_gt_phased(it->ad[1] != 0);
-                    } else if ((it->ad[1] || it->ad[0]) && std::abs(it->ad[0] - it->ad[1]) >= args.thres) {
-                        if (it->ad[0] < it->ad[1]) {
-                            gt = bcf_gt_phased(1);
-                        } else if (it->ad[0] > it->ad[1])  {
-                            gt = bcf_gt_phased(0);
-                        } else { // it->ad[0] == it->ad[1]
-                            gt = bcf_gt_phased(args.alt_default);
-                        }
-                    } 
-                    if (args.diploid) { /* todo: predict an actual diploid */
-                        int32_t gts[2];
-                        gts[0] = gt;
-                        gts[1] = gt; // TODO: actually predict a second genotype.
-                        bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 2);
-                    } else {
-                        int32_t gts[1];
-                        gts[0] = gt;
-                        bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts, 1);
+                int gt_pass = 1;
+                if (args.gt) { // naive genotyping
+                    if (args.alt_sensitive) {
+                        gts = gt_by_alt_evidence(args, *it);
+                    } else if (args.thres >= 0) {
+                        gts = gt_by_threshold(args, *it);
+                    } else { // default: genotype by likelihood
+                        gts = gt_by_likelihood(args, pls);
                     }
+                    bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts.data(), 2);
+                    gt_pass = !bcf_gt_is_missing(gts[0]);
+                    gt_pass &= (!args.homs_only || (args.homs_only && bcf_gt_is_phased(gts[0])));
                 }
-                if (args.keep || ( (it->ad[1] >= args.min_ac) && (!args.gt || (args.gt && !bcf_gt_is_missing(gt))) ) ) {
+                if (args.keep || ( (it->ad[1] >= args.min_ac) && (!args.gt || (args.gt && gt_pass)))) {
+                    if (args.gl) bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "PL", pls.data(), 3);
                     bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "AD", it->ad.data(), 2);
                     if (bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec)) {
                         fprintf(stderr, "bcf_write error\n");
@@ -237,16 +276,18 @@ int main(int argc, char** argv) {
         {"genotype", no_argument, &args.gt, 1},
         {"keep", no_argument, &args.keep, 1},
         {"diploid", no_argument, &args.diploid, 'd'},
-        {"verbose", no_argument, &args.verbose, 1},
         {"alt-default", no_argument, &args.alt_default, 1},
+        {"alt-sensitive", no_argument, &args.alt_sensitive, 1},
+        {"homs-only", no_argument, &args.homs_only, 1},
         {"min-alt-count", required_argument, 0, 'm'},
         {"help", no_argument, 0, 'h'},
+        {"verbose", no_argument, &args.verbose, 1},
         {0,0,0,0}
     };
 
     int ch;
     int argpos = 0;
-    while ( (ch = getopt_long(argc, argv, "-:s:c:m:dgvkhl", long_options, NULL)) != -1 ) {
+    while ( (ch = getopt_long(argc, argv, "-:s:m:gvkhl", long_options, NULL)) != -1 ) {
         switch(ch) {
             case 0:
                 break;
