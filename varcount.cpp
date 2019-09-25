@@ -91,6 +91,10 @@ std::array<int32_t, 2> gt_by_likelihood(const VcntArgs& args, const std::array<i
         case 2:
             gts[0] = bcf_gt_phased(1); gts[1] = bcf_gt_phased(1);
             break;
+        default:
+            fprintf(stderr, "something went wrong\n");
+            exit(1);
+            break;
     }
     return gts;
 }
@@ -133,19 +137,22 @@ void varcount(const VcntArgs& args) {
             for (int32_t i = c->pos; i <= bam_endpos(aln); ++i) {
                 auto found = vmap->find(i);
                 if (found != vmap->end()) {
-                    hts_util::Var* v_cached = &found->second[0];
+                    // hts_util::Var* v_cached = &found->second[0];
                     for (auto&& vv: found->second) {
+                        /*
                         if (vv.rec_start) // keep pointer to this record
                             v_cached = &vv;
+                            */
                         bool x = 0;
                         for (const auto& av: aln_vars) {
                             x |= var_match(vv, av);
                         }
-                        x ? ++(v_cached->ad[1]) : ++(v_cached->ad[0]);
+                        // x ? ++(v_cached->ad[1]) : ++(v_cached->ad[0]);
+                        x ? ++(vv.ad[1]) : ++(vv.ad[0]);
                     }
                     if (args.verbose) {
                         fprintf(stderr, "v %s ", bam_get_qname(aln));
-                        // hts_util::print_varlist(found->second, stderr);
+                        hts_util::print_varlist(found->second, stderr);
                     }
                 }
             }
@@ -190,12 +197,13 @@ void varcount(const VcntArgs& args) {
         for (const auto& v: vs.second)  { // v: {pos, Varlist}
             auto it = v.second.begin();
             while (it != v.second.end()) {
+                /* TODO: print each allele as its own thing */
                 std::string allele_str(it->ref + "," + it->alt);
-                auto nit = std::next(it);
-                while (nit != v.second.end() && !nit->rec_start) {
-                    allele_str += "," + nit->alt;
-                    ++nit;
-                }
+                // auto nit = std::next(it);
+                // while (nit != v.second.end() && !nit->rec_start) {
+                //     allele_str += "," + nit->alt;
+                //     ++nit;
+                // }
                 out_vcf_rec->rid = bcf_hdr_name2id(out_vcf_hdr, vs.first.data());
                 out_vcf_rec->pos = it->pos;
                 out_vcf_rec->rlen = it->ref.size();
@@ -232,7 +240,8 @@ void varcount(const VcntArgs& args) {
                 }
                 bcf_clear(out_vcf_rec);
 
-                it = nit;
+                // it = nit; // DELETED
+                ++it;
             }
         }
     }

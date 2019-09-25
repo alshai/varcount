@@ -12,6 +12,7 @@
 #include <utility>
 #include "mdparse.hpp"
 #include "flat_hash_map.hpp"
+#include "util.hpp"
 
 namespace hts_util {
     enum class VTYPE {V_UNK, V_SNP, V_INS, V_DEL};
@@ -27,7 +28,7 @@ namespace hts_util {
         std::string ref = "";
         // the following WON'T be used in comparators!
         std::string id = ""; 
-        std::array<int32_t, 2> ad;
+        std::array<int32_t, 2> ad = {0, 0};
         // int32_t rc = 0;
         // int32_t ac = 0;
         bool rec_start = 0;
@@ -36,15 +37,18 @@ namespace hts_util {
             (void) hdr;
             std::vector<Var> vs;
             char* ref = b->d.allele[0];
+            // to deal with multi-allele ids:
+            std::vector<std::string> ids = parse_ids(b->d.id);
             for (uint32_t i = 1; i < b->n_allele; ++i) {
                 char* alt = b->d.allele[i];
+                std::string id = ids.size() == (b->n_allele - 1) ? ids[i-1] : std::string(b->d.id);
                 if (alt[0] == '.') continue;
                 if (strlen(alt)  < strlen(ref)) { // DEL
-                    vs.push_back(Var(b->pos, VTYPE::V_DEL, alt, ref, b->d.id)); // don't need alt here
+                    vs.push_back(Var(b->pos, VTYPE::V_DEL, alt, ref, id)); // don't need alt here
                 } else if (strlen(alt) > strlen(ref)) { // INS
-                    vs.push_back(Var(b->pos, VTYPE::V_INS, alt, ref, b->d.id)); // don't need ref here
+                    vs.push_back(Var(b->pos, VTYPE::V_INS, alt, ref, id)); // don't need ref here
                 } else { // SNP
-                    vs.push_back(Var(b->pos, VTYPE::V_SNP, alt, ref, b->d.id)); // don't need ref here
+                    vs.push_back(Var(b->pos, VTYPE::V_SNP, alt, ref, id)); // don't need ref here
                 }
             }
             vs[0].rec_start = 1;
