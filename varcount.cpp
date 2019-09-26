@@ -22,6 +22,8 @@ struct VcntArgs {
     int alt_sensitive = 0;
     int homs_only = 0;
     int min_ac = 0;
+    int min_rc = 0;
+    int min_c = 0;
     int gl = 0;
 };
 
@@ -230,7 +232,7 @@ void varcount(const VcntArgs& args) {
                     gt_pass = !bcf_gt_is_missing(gts[0]);
                     gt_pass &= (!args.homs_only || (args.homs_only && bcf_gt_is_phased(gts[0])));
                 }
-                if (args.keep || ( (it->ad[1] >= args.min_ac) && (!args.gt || (args.gt && gt_pass)))) {
+                if (args.keep || ( (it->ad[0] + it->ad[1] >= args.min_c && it->ad[1] >= args.min_ac && it->ad[0] >= args.min_rc) && (!args.gt || (args.gt && gt_pass)))) {
                     if (args.gl) bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "PL", pls.data(), 3);
                     bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "AD", it->ad.data(), 2);
                     if (bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec)) {
@@ -288,7 +290,9 @@ int main(int argc, char** argv) {
         {"alt-default", no_argument, &args.alt_default, 1},
         {"alt-sensitive", no_argument, &args.alt_sensitive, 1},
         {"homs-only", no_argument, &args.homs_only, 1},
-        {"min-alt-count", required_argument, 0, 'm'},
+        {"min-alt-count", required_argument, 0, 'a'},
+        {"min-ref-count", required_argument, 0, 'r'},
+        {"min-total-count", required_argument, 0, 'm'},
         {"help", no_argument, 0, 'h'},
         {"verbose", no_argument, &args.verbose, 1},
         {0,0,0,0}
@@ -296,7 +300,7 @@ int main(int argc, char** argv) {
 
     int ch;
     int argpos = 0;
-    while ( (ch = getopt_long(argc, argv, "-:s:m:gvkhl", long_options, NULL)) != -1 ) {
+    while ( (ch = getopt_long(argc, argv, "-:s:m:a:r:gvkhl", long_options, NULL)) != -1 ) {
         switch(ch) {
             case 0:
                 break;
@@ -314,8 +318,14 @@ int main(int argc, char** argv) {
             case 'c':
                 args.thres = std::atoi(optarg);
                 break;
-            case 'm':
+            case 'a':
                 args.min_ac = std::atoi(optarg);
+                break;
+            case 'r':
+                args.min_rc = std::atoi(optarg);
+                break;
+            case 'm':
+                args.min_c = std::atoi(optarg);
                 break;
             case 'd':
                 args.diploid = true;
