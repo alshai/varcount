@@ -7,8 +7,6 @@
 #include <getopt.h>
 #include "hts_util.hpp"
 
-constexpr float ERROR_RATE = 0.01;
-
 struct VcntArgs {
     std::string vcf_fname = "";
     std::string sam_fname = "";
@@ -25,6 +23,7 @@ struct VcntArgs {
     int min_rc = 0;
     int min_c = 0;
     int gl = 0;
+    int e = 0.01;
 };
 
 static inline std::tuple<std::string,std::string> truncate_str_pair(const std::string& s1, const std::string& s2) {
@@ -217,7 +216,7 @@ void varcount(const VcntArgs& args) {
                 std::array<int32_t, 2> gts;
                 if (args.gl || (args.gt && args.thres <= 0)) {
                     /* TODO: handle indels smarter. Use individual base qualities */
-                    pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], ERROR_RATE);
+                    pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], args.e);
                 }
                 int gt_pass = 1;
                 if (args.gt) { // naive genotyping
@@ -341,6 +340,9 @@ int main(int argc, char** argv) {
                 break;
             case 'l':
                 args.gl = 1;
+                break;
+            case 'e':
+                args.e = std::atof(optarg);
                 break;
             case 'h':
                 print_help();
