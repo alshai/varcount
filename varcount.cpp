@@ -23,7 +23,7 @@ struct VcntArgs {
     int min_rc = 0;
     int min_c = 0;
     int gl = 0;
-    int e = 0.01;
+    float e = 0.01;
 };
 
 static inline std::tuple<std::string,std::string> truncate_str_pair(const std::string& s1, const std::string& s2) {
