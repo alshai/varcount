@@ -44,11 +44,11 @@ namespace hts_util {
                 std::string id = ids.size() == (b->n_allele - 1) ? ids[i-1] : std::string(b->d.id);
                 if (alt[0] == '.') continue;
                 if (strlen(alt)  < strlen(ref)) { // DEL
-                    vs.push_back(Var(b->pos, VTYPE::V_DEL, alt, ref, id)); // don't need alt here
+                    vs.push_back(Var(b->pos, VTYPE::V_DEL, alt, ref, std::move(id))); // don't need alt here
                 } else if (strlen(alt) > strlen(ref)) { // INS
-                    vs.push_back(Var(b->pos, VTYPE::V_INS, alt, ref, id)); // don't need ref here
+                    vs.push_back(Var(b->pos, VTYPE::V_INS, alt, ref, std::move(id))); // don't need ref here
                 } else { // SNP
-                    vs.push_back(Var(b->pos, VTYPE::V_SNP, alt, ref, id)); // don't need ref here
+                    vs.push_back(Var(b->pos, VTYPE::V_SNP, alt, ref, std::move(id))); // don't need ref here
                 }
             }
             vs[0].rec_start = 1;
