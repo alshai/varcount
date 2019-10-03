@@ -28,7 +28,7 @@ namespace hts_util {
         std::string ref = "";
         // the following WON'T be used in comparators!
         std::string id = ""; 
-        std::array<int32_t, 2> ad = {0, 0};
+        alignas(8) std::array<int32_t, 2> ad = {0, 0};
         // int32_t rc = 0;
         // int32_t ac = 0;
         bool rec_start = 0;
@@ -182,7 +182,7 @@ namespace hts_util {
     int32_t* get_genotype(bcf_hdr_t* hdr, bcf1_t* rec, int* ngt) {
         int32_t *gt_arr = NULL, ngt_arr = 0;
         *ngt = bcf_get_genotypes(hdr, rec, &gt_arr, &ngt_arr);
-        if ( ngt<=0 ) return NULL; // GT not present
+        if ( *ngt<=0 ) return NULL; // GT not present
         else return gt_arr;
     }
 

@@ -52,14 +52,10 @@ std::array<int32_t, 2> gt_by_threshold(const VcntArgs& args, const hts_util::Var
     gts[0] = bcf_gt_missing;
     if (args.thres < 0 && v.ad[1]) {
         gts[0] = bcf_gt_phased(v.ad[1] != 0);
-    } else if ((v.ad[1] || v.ad[0]) && std::abs(v.ad[0] - v.ad[1]) >= args.thres) {
-        if (v.ad[0] < v.ad[1]) {
-            gts[0] = bcf_gt_phased(1);
-        } else if (v.ad[0] > v.ad[1])  {
-            gts[0] = bcf_gt_phased(0);
-        } else { // v.ad[0] == v.ad[1]
-            gts[0] = bcf_gt_phased(args.alt_default);
-        }
+    } else if (*(reinterpret_cast<const uint64_t *>(&v.ad[0])) && std::abs(v.ad[0] - v.ad[1]) >= args.thres) {
+        gts[0] = v.ad[0] < v.ad[1] ? bcf_gt_phased(1) :
+                 v.ad[0] > v.ad[1] ? bcf_gt_phased(0) :
+                 bcf_gt_phased(args.alt_default);
     } 
     gts[1] = gts[0];
     return gts;
@@ -149,7 +145,7 @@ void varcount(const VcntArgs& args) {
                             x |= var_match(vv, av);
                         }
                         // x ? ++(v_cached->ad[1]) : ++(v_cached->ad[0]);
-                        x ? ++(vv.ad[1]) : ++(vv.ad[0]);
+                        ++vv.ad[x != 0];
                     }
                     if (args.verbose) {
                         fprintf(stderr, "v %s ", bam_get_qname(aln));
