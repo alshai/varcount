@@ -11,8 +11,13 @@ struct VHamArgs {
     std::string fn2 = "";
     std::string s1 = "";
     std::string s2 = "";
-    int unphased = 1;
+    int unphased = 0;
+    int flip_gt = 0;
 };
+
+static inline int gta(int i) {
+    return bcf_gt_allele(i);
+}
 
 struct VarGT {
     VarGT(hts_util::Var v, int g1, int g2) : var(v), gt1(g1), gt2(g2) {}
@@ -46,8 +51,9 @@ static inline bool var_match(const hts_util::Var lv, const hts_util::Var rv) {
 }
 
 static inline bool varGT_match(const VarGT lv, const VarGT rv, int gt1, int gt2, int unphased) {
-    if (!unphased) 
+    if (!unphased)  {
         return var_match(lv.var, rv.var) && lv.gt1 == rv.gt1 && lv.gt2 == rv.gt2;
+    }
     else {
         int la1 = bcf_gt_allele(lv.gt1);
         int la2 = bcf_gt_allele(lv.gt2);
@@ -104,23 +110,32 @@ void vcf_hamming(const VHamArgs& args) {
                     tgt[0] = '0' + bcf_gt_allele(v1.gt1);
                     tgt[1] = '|';
                     tgt[2] = '0' + bcf_gt_allele(v1.gt2);
-                    if ((match = varGT_match(v1, v2, v2.gt1, v2.gt2, args.unphased))) {
-                        break;
+                    if (var_match(v1.var, v2.var)) {
+                        int gt_match;
+                        if (!args.unphased) {
+                            gt_match = args.flip_gt ? (gta(v1.gt1) == gta(v2.gt2) && gta(v1.gt2) == gta(v2.gt1)) : (gta(v1.gt1) == gta(v2.gt1) && gta(v1.gt2) == gta(v2.gt2));
+                        } else {
+                            gt_match =  gta(v1.gt1) == gta(v2.gt2) && gta(v1.gt2) == gta(v2.gt1);
+                            gt_match |= gta(v1.gt1) == gta(v2.gt1) && gta(v1.gt2) == gta(v2.gt2);
+                        }
+                        if (gt_match) {
+                            match = 1;
+                            break;
+                        }
                     }
                 }
-                if (match) break;
+                if (match) { hamm += 1; break;}
             }
         }
         bcf_update_format_char(out_vcf_hdr, rec, "TG", &tgt, 3);
         if (match > 1) exit(1);
-        hamm += match;
         bcf_update_format_int32(out_vcf_hdr, rec, "SC", &match, 1);
         if (bcf_write(out_vcf_fp, out_vcf_hdr, rec)) {
             fprintf(stderr, "error writing record\n");
             exit(1);
         }
     }
-    // fprintf(stderr, "%d\n", hamm);
+    fprintf(stderr, "%d\n", hamm);
     bcf_hdr_destroy(out_vcf_hdr);
     bcf_close(out_vcf_fp);
 
@@ -141,6 +156,7 @@ int main(int argc, char** argv) {
         {"ref_sample", required_argument, 0, 'r'},
         {"pred_sample", required_argument, 0, 'p'},
         {"unphased", no_argument, &args.unphased, 1},
+        {"flip-gt", no_argument, &args.flip_gt, 1},
         {0,0,0,0}
     };
 
@@ -161,6 +177,9 @@ int main(int argc, char** argv) {
                 break;
             case 'p':
                 args.s2 = optarg;
+                break;
+            case 'f':
+                args.flip_gt = 1;
                 break;
             case 'h':
                 print_help();

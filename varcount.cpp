@@ -8,22 +8,21 @@
 #include "hts_util.hpp"
 
 struct VcntArgs {
+    enum GT_TYPE {GTN, GTL, GTT, GTA};
     std::string vcf_fname = "";
     std::string sam_fname = "";
     std::string sample_name = "sample";
-    int thres = -1;
-    int gt = 0;
+    int thres = 0;
+    int gt = GT_TYPE::GTN;
     int keep = 0;
     int verbose = 0;
     int diploid = 0;
     int alt_default = 0;
-    int alt_sensitive = 0;
-    int homs_only = 0;
     int min_ac = 0;
     int min_rc = 0;
     int min_c = 0;
     int gl = 0;
-    int e = 0.01;
+    float e = 0.01;
 };
 
 static inline std::tuple<std::string,std::string> truncate_str_pair(const std::string& s1, const std::string& s2) {
@@ -64,12 +63,13 @@ std::array<int32_t, 2> gt_by_threshold(const VcntArgs& args, const hts_util::Var
 std::array<int32_t, 2> gt_by_alt_evidence(const VcntArgs& args, const hts_util::Var& v) {
     std::array<int32_t, 2> gts;
     if (v.ad[1]) {
-        gts[0] = bcf_gt_phased(1); gts[1] = bcf_gt_phased(1);
+        gts[0] = bcf_gt_phased(1);
     } else if (v.ad[0]) {
-        gts[0] = bcf_gt_phased(0); gts[1] = bcf_gt_phased(0);
+        gts[0] = bcf_gt_phased(0);
     } else {
-        gts[0] = bcf_gt_missing; gts[1] = bcf_gt_missing;
+        gts[0] = bcf_gt_missing;
     }
+    gts[1] = gts[0]; // force homozygous 
     return gts;
 }
 
@@ -193,14 +193,8 @@ void varcount(const VcntArgs& args) {
     for (const auto& vs: contig2vars) { // vs: {seq, map}
         for (const auto& v: vs.second)  { // v: {pos, Varlist}
             auto it = v.second.begin();
-            while (it != v.second.end()) {
-                /* TODO: print each allele as its own thing */
+            for (auto it = v.second.begin(); it != v.second.end(); ++it) {
                 std::string allele_str(it->ref + "," + it->alt);
-                // auto nit = std::next(it);
-                // while (nit != v.second.end() && !nit->rec_start) {
-                //     allele_str += "," + nit->alt;
-                //     ++nit;
-                // }
                 out_vcf_rec->rid = bcf_hdr_name2id(out_vcf_hdr, vs.first.data());
                 out_vcf_rec->pos = it->pos;
                 out_vcf_rec->rlen = it->ref.size();
@@ -210,24 +204,26 @@ void varcount(const VcntArgs& args) {
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->ad[0]), 1);
                 std::array<int32_t, 3> pls;
                 std::array<int32_t, 2> gts;
-                if (args.gl || (args.gt && args.thres <= 0)) {
+                if (args.gl || (args.gt == VcntArgs::GT_TYPE::GTL)) {
                     /* TODO: handle indels smarter. Use individual base qualities */
                     pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], args.e);
                 }
                 int gt_pass = 1;
-                if (args.gt) { // naive genotyping
-                    if (args.alt_sensitive) {
+                int count_pass = (it->ad[0] + it->ad[1] >= args.min_c && 
+                                  it->ad[1] >= args.min_ac && 
+                                  it->ad[0] >= args.min_rc);
+                if (count_pass && args.gt) { // naive genotyping
+                    if (args.gt == VcntArgs::GT_TYPE::GTA) {
                         gts = gt_by_alt_evidence(args, *it);
-                    } else if (args.thres >= 0) {
+                    } else if (args.gt == VcntArgs::GT_TYPE::GTT) {
                         gts = gt_by_threshold(args, *it);
                     } else { // default: genotype by likelihood
                         gts = gt_by_likelihood(args, pls);
                     }
                     bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts.data(), 2);
                     gt_pass = !bcf_gt_is_missing(gts[0]);
-                    gt_pass &= (!args.homs_only || (args.homs_only && bcf_gt_is_phased(gts[0])));
                 }
-                if (args.keep || ( (it->ad[0] + it->ad[1] >= args.min_c && it->ad[1] >= args.min_ac && it->ad[0] >= args.min_rc) && (!args.gt || (args.gt && gt_pass)))) {
+                if (args.keep || ( count_pass  && gt_pass )) {
                     if (args.gl) bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "PL", pls.data(), 3);
                     bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "AD", it->ad.data(), 2);
                     if (bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec)) {
@@ -236,9 +232,6 @@ void varcount(const VcntArgs& args) {
                     }
                 }
                 bcf_clear(out_vcf_rec);
-
-                // it = nit; // DELETED
-                ++it;
             }
         }
     }
@@ -263,12 +256,15 @@ Usage:\n\
 <sam>=STR               [bs]sam file name (required)\n\
 -s/--sample-name=STR    sample name in VCF output\n\
                         (default: sample)\n\
--g/--gt                 'predict' a genotype in the GT field based on threshold (-c/--threshold)\n\
--c/--threshold=NUM      Requires -g/--gt. when NUM < 0: GT=1 if ALT >= 1.\n\
-                        when NUM >= 0: GT=1 if ALT-REF >= NUM; GT=0 if REF-ALT >= NUM; GT='.' otherwise.\n\
-                        (note: if NUM == 0 and REF == ALT, GT=0).\n\
-                        (default: 0)\n\
--k/--keep               if threshold not met, print record anyway with undefined genotype\n\
+-g/--genotype           [likelihood, alt_sensitive, threshold]. 'predict' a genotype in the GT field\n\
+                        likelihood: use crude gt likelihood from counts\n\
+                        alt_sensitive: automatically call alleles with any alt evidence as alt/alt\n\
+                        threshold: use a manual threshold of the difference between alt and ref count to determine gt. Use -c parameter to specifiy threshoold\n\
+-c                      int>=0 (default: 0). for use with '-g threshold'. estabilish threshold of ref-alt for determing genotype.  \n\
+-a/--min-alt-count      int>=0 (default: 0). filter loci by minimum depth of reads covering alt allele.\n\
+-r/--min-ref-count      int>=0 (default: 0). filter loci by minimum depth of reads covering ref allele.\n\
+-m/--min-total-count    int>=0 (default: 0). filter loci by minimum depth of total reads.\n\
+-k/--keep               ignore filters, print all records regardless of coverage/genotype\n\
 -v/--verbose            prints detailed logging information to stderr\n\
 -h/--help               print this help message\n\
 \n");
@@ -279,12 +275,9 @@ int main(int argc, char** argv) {
     static struct option long_options[] {
         {"sample-name", required_argument, 0, 's'},
         {"threshold", required_argument, 0, 'c'},
-        {"genotype", no_argument, &args.gt, 1},
+        {"genotype", required_argument, 0, 'g'},
         {"keep", no_argument, &args.keep, 1},
-        {"diploid", no_argument, &args.diploid, 'd'},
         {"alt-default", no_argument, &args.alt_default, 1},
-        {"alt-sensitive", no_argument, &args.alt_sensitive, 1},
-        {"homs-only", no_argument, &args.homs_only, 1},
         {"min-alt-count", required_argument, 0, 'a'},
         {"min-ref-count", required_argument, 0, 'r'},
         {"min-total-count", required_argument, 0, 'm'},
@@ -295,7 +288,7 @@ int main(int argc, char** argv) {
 
     int ch;
     int argpos = 0;
-    while ( (ch = getopt_long(argc, argv, "-:s:m:a:r:gvkhl", long_options, NULL)) != -1 ) {
+    while ( (ch = getopt_long(argc, argv, "-:s:m:a:r:g:c:vkhl", long_options, NULL)) != -1 ) {
         switch(ch) {
             case 0:
                 break;
@@ -322,11 +315,17 @@ int main(int argc, char** argv) {
             case 'm':
                 args.min_c = std::atoi(optarg);
                 break;
-            case 'd':
-                args.diploid = true;
-                break;
             case 'g':
-                args.gt = 1;
+                if (!strcmp(optarg, "threshold")) {
+                    args.gt = VcntArgs::GT_TYPE::GTT;
+                } else if (!strcmp(optarg, "alt_sensitive")) {
+                    args.gt = VcntArgs::GT_TYPE::GTA;
+                } else if (!strcmp(optarg, "") | !strcmp(optarg, "likelihood")) { // "likelihood"
+                    args.gt = VcntArgs::GT_TYPE::GTL;
+                } else {
+                    args.gt = VcntArgs::GT_TYPE::GTL;
+                }
+                fprintf(stderr, "genotyping: %d\n", args.gt);
                 break;
             case 'k':
                 args.keep = 1;
