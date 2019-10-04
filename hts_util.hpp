@@ -6,6 +6,7 @@
 #include <array>
 #include <list>
 #include <string>
+#include <stdexcept>
 #include <htslib/vcf.h>
 #include <htslib/sam.h>
 #include <htslib/hts.h>
@@ -27,7 +28,7 @@ namespace hts_util {
         std::string alt = "";
         std::string ref = "";
         // the following WON'T be used in comparators!
-        std::string id = ""; 
+        std::string id = "";
         alignas(8) std::array<int32_t, 2> ad = {0, 0};
         // int32_t rc = 0;
         // int32_t ac = 0;
@@ -38,14 +39,15 @@ namespace hts_util {
             std::vector<Var> vs;
             char* ref = b->d.allele[0];
             // to deal with multi-allele ids:
-            std::vector<std::string> ids = parse_ids(b->d.id);
+            std::vector<std::string> ids = util::parse_ids(b->d.id);
             for (uint32_t i = 1; i < b->n_allele; ++i) {
                 char* alt = b->d.allele[i];
-                std::string id = ids.size() == (b->n_allele - 1) ? ids[i-1] : std::string(b->d.id);
-                if (alt[0] == '.') continue;
-                if (strlen(alt)  < strlen(ref)) { // DEL
+                std::string id = ids.size() == static_cast<unsigned>((b->n_allele - 1)) ? ids[i-1] : std::string(b->d.id);
+                if (*alt == '.') continue;
+                const size_t alen = std::strlen(alt);
+                if (alen  < strlen(ref)) { // DEL
                     vs.push_back(Var(b->pos, VTYPE::V_DEL, alt, ref, std::move(id))); // don't need alt here
-                } else if (strlen(alt) > strlen(ref)) { // INS
+                } else if (alen > strlen(ref)) { // INS
                     vs.push_back(Var(b->pos, VTYPE::V_INS, alt, ref, std::move(id))); // don't need ref here
                 } else { // SNP
                     vs.push_back(Var(b->pos, VTYPE::V_SNP, alt, ref, std::move(id))); // don't need ref here
@@ -79,18 +81,24 @@ namespace hts_util {
             uint32_t* cs = bam_get_cigar(aln);
             int32_t qpos = 0;
             int32_t rpos = aln->core.pos;
-            int32_t rlen, qlen;
+            int32_t qlen, rlen, oplen, optype;
             for (uint32_t i = 0; i < aln->core.n_cigar; ++i) {
-                rlen = (bam_cigar_type(cs[i]) & 2) ? bam_cigar_oplen(cs[i]) : 0;
-                qlen = (bam_cigar_type(cs[i]) & 1) ? bam_cigar_oplen(cs[i]) : 0;
-                if (bam_cigar_op(cs[i]) == BAM_CINS) {
-                    std::string ins_seq = "";
+                uint32_t csv = cs[i];
+                oplen = bam_cigar_oplen(csv);
+                optype = bam_cigar_type(csv);
+                rlen = (optype & 2) ? oplen : 0;
+                qlen = (optype & 1) ? oplen : 0;
+                switch(bam_cigar_op(csv)) {
+                case BAM_CINS: {
+                    std::string ins_seq;
                     ins_seq += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos-1)]; // adding the previous character here for compatibility with VCF format
                     for (uint32_t j = 0; j < bam_cigar_oplen(cs[i]); ++j) {
                         ins_seq += seq_nt16_str[bam_seqi(bam_get_seq(aln), qpos+j)];
                     }
                     vs.push_back(Var(rpos-1, VTYPE::V_INS, ins_seq, ins_seq.substr(0,1)));
-                } else if (bam_cigar_op(cs[i]) == BAM_CMATCH) {
+                }
+                break;
+                case BAM_CMATCH: {
                     // check potential snps here
                     for (auto it = snps.begin(); it != snps.end(); ) {
                         int32_t s = it->second;
@@ -101,7 +109,9 @@ namespace hts_util {
                             it = snps.erase(it); // we do this so we don't recheck snps that have already been determined, but... maybe deleting it would actually be more expensive?
                         } else ++it;
                     }
-                } else if (bam_cigar_op(cs[i]) == BAM_CDEL) {
+                }
+                break;
+                case BAM_CDEL: {
                     for (auto it = dels.begin(); it != dels.end(); ) {
                         int32_t d = it->second;
                         if (d == rpos - 1) {
@@ -112,13 +122,14 @@ namespace hts_util {
                         } else ++it;
                     }
                 }
+                } // switch(bam_cigar_type(csv))
                 rpos += rlen;
                 qpos += qlen;
             }
             return vs;
         }
 
-    };
+    }; // struct Var
 
 
 
@@ -212,6 +223,10 @@ namespace hts_util {
         }
         return pls;
     }
-};
+    struct htslib_error: public std::runtime_error {
+        htslib_error(std::string msg): std::runtime_error(std::string("htslib error: ") + msg) {}
+    };
+
+} // hts_util
 
 #endif // VARCOUNT_HPP

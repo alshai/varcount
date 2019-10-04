@@ -6,6 +6,7 @@
 #include <htslib/hts.h>
 #include <getopt.h>
 #include "hts_util.hpp"
+using hts_util::htslib_error;
 
 struct VcntArgs {
     enum GT_TYPE {GTN, GTL, GTT, GTA};
@@ -55,7 +56,7 @@ std::array<int32_t, 2> gt_by_threshold(const VcntArgs& args, const hts_util::Var
         gts[0] = v.ad[0] < v.ad[1] ? bcf_gt_phased(1) :
                  v.ad[0] > v.ad[1] ? bcf_gt_phased(0) :
                  bcf_gt_phased(args.alt_default);
-    } 
+    }
     gts[1] = gts[0];
     return gts;
 }
@@ -69,7 +70,7 @@ std::array<int32_t, 2> gt_by_alt_evidence(const VcntArgs& args, const hts_util::
     } else {
         gts[0] = bcf_gt_missing;
     }
-    gts[1] = gts[0]; // force homozygous 
+    gts[1] = gts[0]; // force homozygous
     return gts;
 }
 
@@ -106,7 +107,7 @@ void varcount(const VcntArgs& args) {
     if (bcf_hdr_set_samples(vcf_hdr, NULL, 0)) {
         fprintf(stderr, "error setting samples\n");
         exit(1);
-    } 
+    }
 
     hts_util::contig2map_map<hts_util::Var> contig2vars(hts_util::bcf_to_map(vcf_fp, vcf_hdr));
 
@@ -179,7 +180,7 @@ void varcount(const VcntArgs& args) {
     bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=AD,Number=R,Type=Integer,Description=\"Allelic Depth\">");
     if (args.gt)
         bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
-    if (args.gl) 
+    if (args.gl)
         bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=PL,Number=G,Type=Integer,Description=\"List of Phred-scaled genotype likelihoods\">");
     if (bcf_hdr_write(out_vcf_fp, out_vcf_hdr)) {
         fprintf(stderr, "bcf_hdr_write error\n");
@@ -192,43 +193,43 @@ void varcount(const VcntArgs& args) {
     // TODO: sort the output?
     for (const auto& vs: contig2vars) { // vs: {seq, map}
         for (const auto& v: vs.second)  { // v: {pos, Varlist}
-            auto it = v.second.begin();
-            for (auto it = v.second.begin(); it != v.second.end(); ++it) {
-                std::string allele_str(it->ref + "," + it->alt);
+            for(const auto var: v.second) {
+            //for (auto it = v.second.begin(); it != v.second.end(); ++it) {
+                std::string allele_str(var.ref + "," + var.alt);
                 out_vcf_rec->rid = bcf_hdr_name2id(out_vcf_hdr, vs.first.data());
-                out_vcf_rec->pos = it->pos;
-                out_vcf_rec->rlen = it->ref.size();
+                out_vcf_rec->pos = var.pos;
+                out_vcf_rec->rlen = var.ref.size();
                 bcf_update_alleles_str(out_vcf_hdr, out_vcf_rec, allele_str.data());
-                bcf_update_id(out_vcf_hdr, out_vcf_rec, it->id.data());
-                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &(it->ad[1]), 1);
-                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->ad[0]), 1);
+                bcf_update_id(out_vcf_hdr, out_vcf_rec, var.id.data());
+                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &(var.ad[1]), 1);
+                bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(var.ad[0]), 1);
                 std::array<int32_t, 3> pls;
                 std::array<int32_t, 2> gts;
                 if (args.gl || (args.gt == VcntArgs::GT_TYPE::GTL)) {
                     /* TODO: handle indels smarter. Use individual base qualities */
-                    pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], args.e);
+                    pls = hts_util::get_pls_naive_normalized(var.ad[0], var.ad[1], args.e);
                 }
                 int gt_pass = 1;
-                int count_pass = (it->ad[0] + it->ad[1] >= args.min_c && 
-                                  it->ad[1] >= args.min_ac && 
-                                  it->ad[0] >= args.min_rc);
+                int count_pass = (var.ad[0] + var.ad[1] >= args.min_c &&
+                                  var.ad[1] >= args.min_ac &&
+                                  var.ad[0] >= args.min_rc);
                 if (count_pass && args.gt) { // naive genotyping
-                    if (args.gt == VcntArgs::GT_TYPE::GTA) {
-                        gts = gt_by_alt_evidence(args, *it);
-                    } else if (args.gt == VcntArgs::GT_TYPE::GTT) {
-                        gts = gt_by_threshold(args, *it);
-                    } else { // default: genotype by likelihood
-                        gts = gt_by_likelihood(args, pls);
+                    switch(args.gt) {
+                        case VcntArgs::GT_TYPE::GTA:
+                            gts = gt_by_alt_evidence(args, var); break;
+                        case VcntArgs::GT_TYPE::GTT:
+                            gts = gt_by_threshold(args, var); break;
+                        default:
+                            gts = gt_by_likelihood(args, pls);
                     }
                     bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts.data(), 2);
                     gt_pass = !bcf_gt_is_missing(gts[0]);
                 }
                 if (args.keep || ( count_pass  && gt_pass )) {
                     if (args.gl) bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "PL", pls.data(), 3);
-                    bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "AD", it->ad.data(), 2);
+                    bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "AD", var.ad.data(), 2);
                     if (bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec)) {
-                        fprintf(stderr, "bcf_write error\n");
-                        exit(1);
+                        throw htslib_error("bcf_write failed");
                     }
                 }
                 bcf_clear(out_vcf_rec);
@@ -240,6 +241,7 @@ void varcount(const VcntArgs& args) {
 
     bcf_hdr_destroy(vcf_hdr);
     bcf_close(vcf_fp);
+    bcf_destroy(out_vcf_rec);
 }
 
 void print_help() {

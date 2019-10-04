@@ -6,19 +6,10 @@
 #include <cstring>
 #include <string>
 
-
-std::vector<std::string> parse_ids(const char* s) {
+namespace util {
+template<char SEP=';'>
+std::vector<std::string> parse_dsv(const char* s) {
     std::vector<std::string> ss;
-#if TAHER
-    char* s__ = (char*) malloc(sizeof(char) * (strlen(s) + 1));
-    strcpy(s__, s);
-    char* s_ = std::strtok(s__, ";");
-    while (s_ != NULL) {
-        ss.push_back(s_);
-        s_ = std::strtok(NULL, ";");
-    }
-    free(s__);
-#else
     const char *p1 = s, *p2 = std::strchr(p1, ';');
     for(;;) {
         ss.emplace_back(p1, p2 - p1);
@@ -29,8 +20,11 @@ std::vector<std::string> parse_ids(const char* s) {
             break;
         }
     }
-#endif
     return ss;
 }
+std::vector<std::string> parse_ids(const char* s) {
+    return parse_dsv<';'>(s);
+}
+} // util
 
 #endif
