@@ -11,7 +11,8 @@
 
 struct MDPos {
     uint32_t p = 0;
-    std::string str = ""; // maybe we can get away with char* instead?
+    std::string str; // maybe we can get away with char* instead?
+                     // maybe leave it -- it's probably < 16, so it should stay on the stack through SSO.
     int st = MD_END;
 };
 

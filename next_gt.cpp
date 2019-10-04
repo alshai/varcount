@@ -36,6 +36,17 @@ struct VarGT {
     bool rec_start = 0;
 };
 
+static inline bool operator==(const VarGT& lv, const VarGT& rv) {
+    bcf1_t &l = *lv.rec, &r = *rv.rec;
+    return l.pos == r.pos && std::strcmp(r.d.allele[0], l.d.allele[0]) == 0 &&
+                             std::strcmp(r.d.allele[1], l.d.allele[1]) == 0 &&
+                             lv.gt1 == rv.gt1 &&
+                             lv.gt2 == rv.gt2;
+}
+static inline bool operator!=(const VarGT& lv, const VarGT& rv) {
+    return !(lv == rv);
+}
+
 static inline bool var_match(const VarGT& lv, const VarGT& rv) {
     bcf1_t* l = lv.rec;
     bcf1_t* r = rv.rec;
@@ -79,7 +90,7 @@ void compare_vcfs(CmpVcfArgs args) {
         bool match = 0;
         if (vars1_iter != vmap->end()) {
             for (const auto& v1: vars1_iter->second) {
-                if (var_match(v1, v2)) {
+                if (v1 == v2) {
                     match = 1;
                     break;
                 }

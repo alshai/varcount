@@ -20,7 +20,7 @@ static inline int gta(int i) {
 }
 
 struct VarGT {
-    VarGT(hts_util::Var v, int g1, int g2) : var(v), gt1(g1), gt2(g2) {}
+    VarGT(hts_util::Var v, int g1, int g2) : gt1(g1), gt2(g2), var(v) {}
     int gt1 = 0;
     int gt2 = 0;
     hts_util::Var var;
@@ -31,10 +31,10 @@ struct VarGT {
         int* gts = hts_util::get_genotype(hdr, b, &ngt);
         if (ngt < 2) { fprintf(stderr, "not diploid!\n"); exit(1); }
         auto vs = hts_util::Var::from_bcf(hdr, b);
-        for (int i = 0; i < vs.size(); ++i) {
+        for (unsigned i = 0; i < vs.size(); ++i) {
             /* this hack allows compatibility with vcfs that don't allow multi-allelic lines */
             for (int j = 0; j < 2; ++j) {
-                if (bcf_gt_allele(gts[j]) == i+1) {
+                if (static_cast<unsigned>(bcf_gt_allele(gts[j])) == i+1) {
                     gts[j] = bcf_gt_is_phased(gts[j]) ? bcf_gt_phased(1) : bcf_gt_unphased(1);
                 } else if (bcf_gt_allele(gts[j]) != 0) {
                     gts[j] = bcf_gt_is_phased(gts[j]) ? bcf_gt_phased(2) : bcf_gt_unphased(2);
