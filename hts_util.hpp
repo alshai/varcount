@@ -190,25 +190,41 @@ namespace hts_util {
      * output: genotype likelihood for ref/ref, ref/alt, alt/alt genotypes, resp.
      * assumes uniform base qualities. Makes no distinction between SNPS and indels
      */
-    inline std::array<int, 3> get_pls_naive(int rc, int ac, float e) {
+    inline std::array<int, 3> get_pls_naive(int rc, int ac, double e) {
         std::array<int, 3> pls;
-        pls[0] = static_cast<int>( -10 * ((rc*std::log10(1-e)) + (ac*std::log(e))) );
+        pls[0] = static_cast<int>( -10 * ((rc*std::log10(1-e)) + (ac*std::log10(e))) );
         pls[1] = static_cast<int>( 10 * (rc + ac) * std::log10(2) );
-        pls[2] = static_cast<int>( -10 * ((ac*std::log10(1-e)) + (rc*std::log(e))) );
+        pls[2] = static_cast<int>( -10 * ((ac*std::log10(1-e)) + (rc*std::log10(e))) );
         return pls;
     }
 
-    inline std::array<int32_t, 3> get_pls_naive_normalized(int32_t rc, int32_t ac, float e) {
+    inline std::array<int32_t, 3> get_pls_naive_normalized(int32_t rc, int32_t ac, double e) {
         std::array<int32_t, 3> pls;
-        pls[0] = static_cast<int32_t>( -10 * ((rc*std::log10(1-e)) + (ac*std::log(e))) );
+        pls[0] = static_cast<int32_t>( -10 * ((rc*std::log10(1-e)) + (ac*std::log10(e))) );
         pls[1] = static_cast<int32_t>( 10 * (rc + ac) * std::log10(2) );
-        pls[2] = static_cast<int32_t>( -10 * ((ac*std::log10(1-e)) + (rc*std::log(e))) );
+        pls[2] = static_cast<int32_t>( -10 * ((ac*std::log10(1-e)) + (rc*std::log10(e))) );
         int32_t min = pls[0];
         for (int i = 1; i < 3; ++i) {
             if (pls[i] < min) min = pls[i];
         }
         for (int i = 0; i < 3; ++i) {
             pls[i] -= min;
+        }
+        return pls;
+    }
+
+    inline std::array<double, 3> get_gls_naive(int rc, int ac, double e) {
+        std::array<double, 3> gls;
+        gls[0] =  (rc*std::log10(1-e)) + (ac*std::log10(e));
+        gls[1] =  -1 * (rc + ac) * std::log10(2);
+        gls[2] =  (ac*std::log10(1-e)) + (rc*std::log10(e));
+        return gls;
+    }
+
+    inline std::array<int32_t, 3> gl_to_pl(std::array<double, 3> gls) {
+        std::array<int32_t, 3> pls;
+        for (int i = 0; i < 3; ++i) {
+            pls[i] = static_cast<int32_t>(-10 * gls[i]);
         }
         return pls;
     }

@@ -34,14 +34,17 @@ struct VarGT {
         for (int i = 0; i < vs.size(); ++i) {
             /* this hack allows compatibility with vcfs that don't allow multi-allelic lines */
             for (int j = 0; j < 2; ++j) {
-                if (bcf_gt_allele(gts[j]) == i+1) {
-                    gts[j] = bcf_gt_is_phased(gts[j]) ? bcf_gt_phased(1) : bcf_gt_unphased(1);
-                } else if (bcf_gt_allele(gts[j]) != 0) {
-                    gts[j] = bcf_gt_is_phased(gts[j]) ? bcf_gt_phased(2) : bcf_gt_unphased(2);
+                if (gta(gts[j])) { // don't touch if ref allele
+                    if (gta(gts[j]) == i+1) { // 1 for the alt allele the indv actually has
+                        gts[j] = bcf_gt_is_phased(gts[j]) ? bcf_gt_phased(1) : bcf_gt_unphased(1);
+                    } else { // 2 for the alt allele that they don't have
+                        gts[j] = bcf_gt_is_phased(gts[j]) ? bcf_gt_phased(2) : bcf_gt_unphased(2);
+                    }
                 }
             }
             rets.push_back(VarGT(vs[i], gts[0], gts[1]));
         }
+        free(gts);
         return rets;
     }
 };
@@ -107,11 +110,11 @@ void vcf_hamming(const VHamArgs& args) {
             auto v2s = VarGT::from_bcf(hdr2, rec);
             for (const auto& v2: v2s) {
                 for (const auto& v1: v1s) {
-                    tgt[0] = '0' + bcf_gt_allele(v1.gt1);
+                    tgt[0] = '0' + gta(v1.gt1);
                     tgt[1] = '|';
-                    tgt[2] = '0' + bcf_gt_allele(v1.gt2);
+                    tgt[2] = '0' + gta(v1.gt2);
                     if (var_match(v1.var, v2.var)) {
-                        int gt_match;
+                        int gt_match = 0;
                         if (!args.unphased) {
                             gt_match = args.flip_gt ? (gta(v1.gt1) == gta(v2.gt2) && gta(v1.gt2) == gta(v2.gt1)) : (gta(v1.gt1) == gta(v2.gt1) && gta(v1.gt2) == gta(v2.gt2));
                         } else {
@@ -124,7 +127,7 @@ void vcf_hamming(const VHamArgs& args) {
                         }
                     }
                 }
-                if (match) { hamm += 1; break;}
+                if (!match) { hamm += 1; break;}
             }
         }
         bcf_update_format_char(out_vcf_hdr, rec, "TG", &tgt, 3);

@@ -22,7 +22,7 @@ struct VcntArgs {
     int min_rc = 0;
     int min_c = 0;
     int gl = 0;
-    float e = 0.01;
+    double e = 0.01;
 };
 
 static inline std::tuple<std::string,std::string> truncate_str_pair(const std::string& s1, const std::string& s2) {
@@ -77,12 +77,17 @@ std::array<int32_t, 2> gt_by_alt_evidence(const VcntArgs& args, const hts_util::
     return gts;
 }
 
-std::array<int32_t, 2> gt_by_likelihood(const VcntArgs& args, const std::array<int32_t, 3>& pls) {
+std::array<int32_t, 2> gt_by_likelihood(const VcntArgs& args, const std::array<double, 3>& gls) {
     std::array<int32_t, 2> gts;
-    int min = pls[0], minidx = 0;
-    if (pls[1] < min) { min = pls[1]; minidx = 1; }
-    if (pls[2] < min) { min = pls[2]; minidx = 2; }
-    switch (minidx) {
+    /*
+    int min = gls[0], minidx = 0;
+    if (gls[1] < min) { min = gls[1]; minidx = 1; }
+    if (gls[2] < min) { min = gls[2]; minidx = 2; }
+    */
+    int max = gls[0], maxidx = 0;
+    if (gls[1] > max) { max = gls[1]; maxidx = 1; }
+    if (gls[2] > max) { max = gls[2]; maxidx = 2; }
+    switch (maxidx) {
         case 0:
             gts[0] = bcf_gt_phased(0); gts[1] = bcf_gt_phased(0);
             break;
@@ -206,11 +211,13 @@ void varcount(const VcntArgs& args) {
                 bcf_update_id(out_vcf_hdr, out_vcf_rec, it->id.data());
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "ALTCNT", &(it->ad[1]), 1);
                 bcf_update_info_int32(out_vcf_hdr, out_vcf_rec, "REFCNT", &(it->ad[0]), 1);
-                std::array<int32_t, 3> pls;
+                // std::array<int32_t, 3> pls;
+                std::array<double, 3> gls;
                 std::array<int32_t, 2> gts;
                 if (args.gl || (args.gt == VcntArgs::GT_TYPE::GTL)) {
                     /* TODO: handle indels smarter. Use individual base qualities */
-                    pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], args.e);
+                    // pls = hts_util::get_pls_naive_normalized(it->ad[0], it->ad[1], args.e);
+                    gls = hts_util::get_gls_naive(it->ad[0], it->ad[1], args.e);
                 }
                 int gt_pass = 1;
                 int count_pass = (it->ad[0] + it->ad[1] >= args.min_c && 
@@ -222,12 +229,14 @@ void varcount(const VcntArgs& args) {
                     } else if (args.gt == VcntArgs::GT_TYPE::GTT) {
                         gts = gt_by_threshold(args, *it);
                     } else { // default: genotype by likelihood
-                        gts = gt_by_likelihood(args, pls);
+                        // gts = gt_by_likelihood(args, pls);
+                        gts = gt_by_likelihood(args, gls);
                     }
                     bcf_update_genotypes(out_vcf_hdr, out_vcf_rec, gts.data(), 2);
                     gt_pass = !bcf_gt_is_missing(gts[0]);
                 }
                 if (args.keep || ( count_pass  && gt_pass )) {
+                    auto pls = hts_util::gl_to_pl(gls);
                     if (args.gl) bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "PL", pls.data(), 3);
                     bcf_update_format_int32(out_vcf_hdr, out_vcf_rec, "AD", it->ad.data(), 2);
                     if (bcf_write(out_vcf_fp, out_vcf_hdr, out_vcf_rec)) {
@@ -329,7 +338,6 @@ int main(int argc, char** argv) {
                 } else {
                     args.gt = VcntArgs::GT_TYPE::GTL;
                 }
-                fprintf(stderr, "genotyping: %d\n", args.gt);
                 break;
             case 'k':
                 args.keep = 1;
