@@ -13,6 +13,7 @@ struct VHamArgs {
     std::string s2 = "";
     int unphased = 0;
     int flip_gt = 0;
+    int score_only = 0;
 };
 
 static inline int gta(int i) {
@@ -86,15 +87,19 @@ void vcf_hamming(const VHamArgs& args) {
     int pid = -1;
     int hamm = 0;
 
-    vcfFile* out_vcf_fp = bcf_open("-", "w");
-    bcf_hdr_t* out_vcf_hdr = bcf_hdr_dup(hdr2);
-    // bcf_hdr_add_sample(out_vcf_hdr, args.s2 == "" ? "sample" : args.s2.data());
-    bcf_hdr_set_version(out_vcf_hdr, "VCFv4.3");
-    bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=TG,Number=1,Type=String,Description=\"True genotype\">");
-    bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=SC,Number=1,Type=Integer,Description=\"1 if 'correct', 0 otherwise\">");
-    if (bcf_hdr_write(out_vcf_fp, out_vcf_hdr)) {
-        fprintf(stderr, "bcf_hdr_write error\n");
-        exit(1);
+    vcfFile* out_vcf_fp;
+    bcf_hdr_t* out_vcf_hdr;
+    if (!args.score_only) {
+        out_vcf_fp = bcf_open("-", "w");
+        out_vcf_hdr = bcf_hdr_dup(hdr2);
+        // bcf_hdr_add_sample(out_vcf_hdr, args.s2 == "" ? "sample" : args.s2.data());
+        bcf_hdr_set_version(out_vcf_hdr, "VCFv4.3");
+        bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=TG,Number=1,Type=String,Description=\"True genotype\">");
+        bcf_hdr_append(out_vcf_hdr, "##FORMAT=<ID=SC,Number=1,Type=Integer,Description=\"1 if 'correct', 0 otherwise\">");
+        if (bcf_hdr_write(out_vcf_fp, out_vcf_hdr)) {
+            fprintf(stderr, "bcf_hdr_write error\n");
+            exit(1);
+        }
     }
     while (!bcf_read(fp2, hdr2, rec)) {
         bcf_unpack(rec, BCF_UN_ALL);
@@ -130,17 +135,23 @@ void vcf_hamming(const VHamArgs& args) {
                 if (!match) { hamm += 1; break;}
             }
         }
-        bcf_update_format_char(out_vcf_hdr, rec, "TG", &tgt, 3);
         if (match > 1) exit(1);
-        bcf_update_format_int32(out_vcf_hdr, rec, "SC", &match, 1);
-        if (bcf_write(out_vcf_fp, out_vcf_hdr, rec)) {
-            fprintf(stderr, "error writing record\n");
-            exit(1);
+        if (!args.score_only) {
+            bcf_update_format_char(out_vcf_hdr, rec, "TG", &tgt, 3);
+            bcf_update_format_int32(out_vcf_hdr, rec, "SC", &match, 1);
+            if (bcf_write(out_vcf_fp, out_vcf_hdr, rec)) {
+                fprintf(stderr, "error writing record\n");
+                exit(1);
+            }
         }
     }
-    fprintf(stderr, "%d\n", hamm);
-    bcf_hdr_destroy(out_vcf_hdr);
-    bcf_close(out_vcf_fp);
+    if (args.score_only) {
+        fprintf(stdout, "%d\n", hamm);
+    } else {
+        bcf_hdr_destroy(out_vcf_hdr);
+        bcf_close(out_vcf_fp);
+        fprintf(stderr, "%d\n", hamm);
+    }
 
     bcf_hdr_destroy(hdr1);
     bcf_hdr_destroy(hdr2);
@@ -160,6 +171,7 @@ int main(int argc, char** argv) {
         {"pred_sample", required_argument, 0, 'p'},
         {"unphased", no_argument, &args.unphased, 1},
         {"flip-gt", no_argument, &args.flip_gt, 1},
+        {"score-only", no_argument, &args.score_only, 1},
         {0,0,0,0}
     };
 
