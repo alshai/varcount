@@ -140,7 +140,7 @@ void varcount(const VcntArgs& args) {
             }
             // can we vectorize or at least parallelize this? would it be worth it?
             // as of now, the performance bottleneck is the VCF reading
-            for (int32_t i = c->pos; i <= bam_endpos(aln); ++i) {
+            for (int32_t i = c->pos; i < bam_endpos(aln); ++i) {
                 auto found = vmap->find(i);
                 if (found != vmap->end()) {
                     // hts_util::Var* v_cached = &found->second[0];
