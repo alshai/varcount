@@ -111,9 +111,7 @@ std::array<int32_t, 2> gt_by_likelihood(const VcntArgs& args, const std::array<d
 #include <cstdlib>
 #include "mdparse.hpp"
 
-void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap)
-{
-	fprintf(stderr, "looking at record: %s %d\n", bam_get_qname(rec), rec->core.pos);
+void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap) {
 	uint32_t* cigar = bam_get_cigar(rec);
 	int r = rec->core.pos;
 	uint8_t* md_ptr = bam_aux_get(rec, "MD");
@@ -124,14 +122,11 @@ void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap)
 	}
 	else md = bam_aux2Z(md_ptr);
 	auto mdv = md_parse(md);
-	for (auto m: mdv) {
-		fprintf(stderr, "md: %d %d\n", m.p, m.st);
-	}
 	int mdi = 0;
+    // fprintf(stderr, "%s\n", bam_get_qname(rec));
 	for (int i = 0, a=0; i < rec->core.n_cigar; ++i) {
 		int op = bam_cigar_op(cigar[i]);
 		int l = bam_cigar_oplen(cigar[i]);
-		fprintf(stderr, "OP: %d, L: %d\n", op, l);
 		// load variants from p to p+l
 		if (op == BAM_CMATCH || op == BAM_CEQUAL || op == BAM_CDIFF) {
 			for (int j = 0; j < l; ++j) {
@@ -139,28 +134,61 @@ void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap)
 				int rpos = r + j; // rpos is position within reference
 				bool mdm=0, vm=0;
 				// skip deletions in md tag
-				while (mdi<mdv.size() && (mdv[mdi].st == MD_DEL || mdv[mdi].p < apos)) 
+				while (mdi<mdv.size() && (mdv[mdi].st == MD_DEL || mdv[mdi].p+rec->core.pos < rpos)) 
 					++mdi; 
-				// does apos match an MD tag position?
-				mdm = (mdv[mdi].st == MD_SNP && mdv[mdi].p == apos);
-				if (mdm) {
-					fprintf(stderr, "mismatch found at %d/%d\n", rpos, apos);
-				} else {
-					fprintf(stderr, "mismatch not found at %d/%d (next md is %d)\n", rpos, apos, mdv[mdi].p);
-				}
-				// TODO: does rpos match a variant?
-				// if both, compare MD tag to variant
-				// if just MD tag, do nothing
-				// TODO: if just variant, update refcount for variant
-				// if MD tag was found, increment to next in list
+                // check if apos is represented in MD
+                char c = ' ';
+				mdm = (mdv[mdi].st == MD_SNP && mdv[mdi].p+rec->core.pos == rpos);
+                if (mdm) {  // get SNV if so
+                    c = seq_nt16_str[bam_seqi(bam_get_seq(rec), apos)];
+                }
+				auto found = vmap->find(rpos);
+                if (found != vmap->end()) {
+                    for (auto& vv: found->second) {
+                        if (mdm) {
+                            // need to further check that the mismatch is the same
+                            if (vv.type == hts_util::VTYPE::V_SNP && vv.alt[0] == c)  {
+                                ++vv.ad[1];
+                            }
+                        } else { // no MD tag -> matches ref
+                            ++vv.ad[0];
+                        }
+                    }
+                }
 			}
 			r += l;
 			a += l;
 		} else if (op == BAM_CDEL || op == BAM_CREF_SKIP) {
-			fprintf(stderr, "size %d deletion found at %d\n", l, r);
+			// fprintf(stderr, "size %d deletion found at %d\n", l, r);
+            auto found = vmap->find(r-1);
+            if (found != vmap->end()) {
+                for (auto vv: found->second) {
+                    if (vv.type == hts_util::VTYPE::V_DEL) {
+                        if (vv.alt.size() > 1)  {
+                            fprintf(stderr, "warning: deletion alt allele has size > 1\n");
+                        }
+                        if (l == vv.ref.size() - vv.alt.size()) {
+                            ++vv.ad[1];
+                        }
+                    } 
+                }
+            }
 			r += l;
 		} else if (op == BAM_CINS || op == BAM_CSOFT_CLIP) {
-			fprintf(stderr, "size %d insertion found at %d\n", l, r);
+			// fprintf(stderr, "size %d insertion found at %d\n", l, r);
+            auto found = vmap->find(r-1);
+            if (found != vmap->end()) {
+                for (auto vv: found->second) {
+                    if (vv.type == hts_util::VTYPE::V_INS) {
+                        if (vv.ref.size() > 1)  {
+                            fprintf(stderr, "warning: insertion alt allele has size > 1\n");
+                        }
+                        if (l == vv.alt.size() - vv.ref.size()) {
+                            ++vv.ad[1];
+                        }
+                    } 
+                }
+            }
 			a += l;
 		}
 	}
@@ -178,6 +206,7 @@ void varcount(const VcntArgs& args) {
         exit(1);
     } 
 
+    // TODO: switch to an array implementation
     hts_util::contig2map_map<hts_util::Var> contig2vars(hts_util::bcf_to_map(vcf_fp, vcf_hdr));
 
     int32_t pid = -1;
@@ -189,40 +218,10 @@ void varcount(const VcntArgs& args) {
         if((c->flag & BAM_FUNMAP) == 0 && (c->flag & BAM_FSECONDARY) == 0) {
             if (c->tid != pid) {
                 // load new hash table
-                // TODO: maybe we should do the VCF reading step here (subsetting by region) instead of reading the whole thing beforehand
                 vmap = &(contig2vars[sam_hdr->target_name[c->tid]]);
             }
             pid = c->tid;
-
-            std::vector<hts_util::Var> aln_vars(hts_util::Var::from_bam(aln));
-            if (args.verbose) {
-                fprintf(stderr, "a %s ", bam_get_qname(aln));
-                // hts_util::print_varlist(aln_vars, stderr);
-            }
-            // can we vectorize or at least parallelize this? would it be worth it?
-            // as of now, the performance bottleneck is the VCF reading
-            for (int32_t i = c->pos; i < bam_endpos(aln); ++i) {
-                auto found = vmap->find(i);
-                if (found != vmap->end()) {
-                    // hts_util::Var* v_cached = &found->second[0];
-                    for (auto&& vv: found->second) {
-                        /*
-                        if (vv.rec_start) // keep pointer to this record
-                            v_cached = &vv;
-                            */
-                        bool x = 0;
-                        for (const auto& av: aln_vars) {
-                            x |= var_match(vv, av);
-                        }
-                        // x ? ++(v_cached->ad[1]) : ++(v_cached->ad[0]);
-                        x ? ++(vv.ad[1]) : ++(vv.ad[0]);
-                    }
-                    if (args.verbose) {
-                        fprintf(stderr, "v %s ", bam_get_qname(aln));
-                        hts_util::print_varlist(found->second, stderr);
-                    }
-                }
-            }
+            aln_varcount(aln, vmap);
         }
     }
 
