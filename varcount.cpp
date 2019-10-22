@@ -105,6 +105,67 @@ std::array<int32_t, 2> gt_by_likelihood(const VcntArgs& args, const std::array<d
     return gts;
 }
 
+#include <htslib/sam.h>
+#include <cinttypes>
+#include <cstdio>
+#include <cstdlib>
+#include "mdparse.hpp"
+
+void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap)
+{
+	fprintf(stderr, "looking at record: %s %d\n", bam_get_qname(rec), rec->core.pos);
+	uint32_t* cigar = bam_get_cigar(rec);
+	int r = rec->core.pos;
+	uint8_t* md_ptr = bam_aux_get(rec, "MD");
+	char* md;
+	if (md_ptr == NULL) {
+		fprintf(stderr, "error: MD tag not found\n");
+		exit(1);
+	}
+	else md = bam_aux2Z(md_ptr);
+	auto mdv = md_parse(md);
+	for (auto m: mdv) {
+		fprintf(stderr, "md: %d %d\n", m.p, m.st);
+	}
+	int mdi = 0;
+	for (int i = 0, a=0; i < rec->core.n_cigar; ++i) {
+		int op = bam_cigar_op(cigar[i]);
+		int l = bam_cigar_oplen(cigar[i]);
+		fprintf(stderr, "OP: %d, L: %d\n", op, l);
+		// load variants from p to p+l
+		if (op == BAM_CMATCH || op == BAM_CEQUAL || op == BAM_CDIFF) {
+			for (int j = 0; j < l; ++j) {
+				int apos = a + j; // apos is position within alignment
+				int rpos = r + j; // rpos is position within reference
+				bool mdm=0, vm=0;
+				// skip deletions in md tag
+				while (mdi<mdv.size() && (mdv[mdi].st == MD_DEL || mdv[mdi].p < apos)) 
+					++mdi; 
+				// does apos match an MD tag position?
+				mdm = (mdv[mdi].st == MD_SNP && mdv[mdi].p == apos);
+				if (mdm) {
+					fprintf(stderr, "mismatch found at %d/%d\n", rpos, apos);
+				} else {
+					fprintf(stderr, "mismatch not found at %d/%d (next md is %d)\n", rpos, apos, mdv[mdi].p);
+				}
+				// TODO: does rpos match a variant?
+				// if both, compare MD tag to variant
+				// if just MD tag, do nothing
+				// TODO: if just variant, update refcount for variant
+				// if MD tag was found, increment to next in list
+			}
+			r += l;
+			a += l;
+		} else if (op == BAM_CDEL || op == BAM_CREF_SKIP) {
+			fprintf(stderr, "size %d deletion found at %d\n", l, r);
+			r += l;
+		} else if (op == BAM_CINS || op == BAM_CSOFT_CLIP) {
+			fprintf(stderr, "size %d insertion found at %d\n", l, r);
+			a += l;
+		}
+	}
+}
+
 void varcount(const VcntArgs& args) {
     samFile* sam_fp = sam_open(args.sam_fname.data(), "r");
     bam_hdr_t* sam_hdr = sam_hdr_read(sam_fp);
