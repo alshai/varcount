@@ -123,36 +123,48 @@ void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap)
 	else md = bam_aux2Z(md_ptr);
 	auto mdv = md_parse(md);
 	int mdi = 0;
+    int nc = rec->core.n_cigar;
     // fprintf(stderr, "%s\n", bam_get_qname(rec));
 	for (int i = 0, a=0; i < rec->core.n_cigar; ++i) {
 		int op = bam_cigar_op(cigar[i]);
 		int l = bam_cigar_oplen(cigar[i]);
 		// load variants from p to p+l
 		if (op == BAM_CMATCH || op == BAM_CEQUAL || op == BAM_CDIFF) {
+            int nop = i+1 < rec->core.n_cigar ? bam_cigar_op(cigar[i+1]) : -1;
 			for (int j = 0; j < l; ++j) {
 				int apos = a + j; // apos is position within alignment
 				int rpos = r + j; // rpos is position within reference
 				bool mdm=0, vm=0;
-				// skip deletions in md tag
+				// skip deletions in md tag, we don't need them
 				while (mdi<mdv.size() && (mdv[mdi].st == MD_DEL || mdv[mdi].p+rec->core.pos < rpos)) 
 					++mdi; 
-                // check if apos is represented in MD
+                // check if SNV at this position
                 char c = ' ';
 				mdm = (mdv[mdi].st == MD_SNP && mdv[mdi].p+rec->core.pos == rpos);
-                if (mdm) {  // get SNV if so
-                    c = seq_nt16_str[bam_seqi(bam_get_seq(rec), apos)];
-                }
+                if (mdm) c = seq_nt16_str[bam_seqi(bam_get_seq(rec), apos)];
+                // check var at this position
 				auto found = vmap->find(rpos);
                 if (found != vmap->end()) {
                     for (auto& vv: found->second) {
-                        if (mdm) {
-                            // need to further check that the mismatch is the same
-                            if (vv.type == hts_util::VTYPE::V_SNP && vv.alt[0] == c)  {
-                                ++vv.ad[1];
+                        if (vv.type == hts_util::VTYPE::V_SNP) {
+                            if (mdm) vv.ad[1] += (vv.alt[0] == c);
+                            else ++vv.ad[0];
+                        } else if (vv.type == hts_util::VTYPE::V_DEL) {
+                            if (vv.alt.size() > 1)  {
+                                fprintf(stderr, "%d warning: deletion alt allele has size > 1 (%d). Did you left-normalize?\n", vv.pos, vv.alt.size());
                             }
-                        } else { // no MD tag -> matches ref
-                            ++vv.ad[0];
-                        }
+                            if (j != l-1 || (nop != BAM_CDEL && nop != BAM_CREF_SKIP )) {
+                                ++vv.ad[0];
+                            } 
+                        } else if (vv.type == hts_util::VTYPE::V_INS) {
+                            if (vv.ref.size() > 1)  {
+                                fprintf(stderr, "%d warning: insertion ref allele has size > 1 (%d). Did you left-normalize?\n", vv.pos, vv.ref.size());
+                            }
+                            if (j != l-1 || ( nop != BAM_CINS && nop != BAM_CSOFT_CLIP )) {
+                                // fprintf(stderr, "ins ref allele at %d, %d, %d, %d\n", rpos, j, l, nop);
+                                ++vv.ad[0];
+                            }
+                        } // let other op states handle j == l-1 case
                     }
                 }
 			}
@@ -162,10 +174,10 @@ void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap)
 			// fprintf(stderr, "size %d deletion found at %d\n", l, r);
             auto found = vmap->find(r-1);
             if (found != vmap->end()) {
-                for (auto vv: found->second) {
+                for (auto& vv: found->second) {
                     if (vv.type == hts_util::VTYPE::V_DEL) {
                         if (vv.alt.size() > 1)  {
-                            fprintf(stderr, "warning: deletion alt allele has size > 1\n");
+                            fprintf(stderr, "%d warning: deletion alt allele has size > 1 (%d). Did you left-normalize?\n", vv.pos, vv.alt.size());
                         }
                         if (l == vv.ref.size() - vv.alt.size()) {
                             ++vv.ad[1];
@@ -178,10 +190,10 @@ void aln_varcount(const bam1_t* rec, hts_util::pos2var_map<hts_util::Var>* vmap)
 			// fprintf(stderr, "size %d insertion found at %d\n", l, r);
             auto found = vmap->find(r-1);
             if (found != vmap->end()) {
-                for (auto vv: found->second) {
+                for (auto& vv: found->second) {
                     if (vv.type == hts_util::VTYPE::V_INS) {
                         if (vv.ref.size() > 1)  {
-                            fprintf(stderr, "warning: insertion alt allele has size > 1\n");
+                            fprintf(stderr, "%d warning: insertion ref allele has size > 1 (%d). Did you left-normalize?\n", vv.pos, vv.ref.size());
                         }
                         if (l == vv.alt.size() - vv.ref.size()) {
                             ++vv.ad[1];
