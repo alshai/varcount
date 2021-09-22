@@ -7,13 +7,14 @@ set(PROJECT_DESCRIPTION "Outputs alignment coverage over a predefined set of var
 set(CMAKE_CXX_STANDARD 11)
 
 # htslib
-find_package(PkgConfig REQUIRED)
-pkg_search_module(PKG_HTSLIB REQUIRED htslib)
+find_library(LIB_HTS hts)
+include_directories($ENV{CONDA_PREFIX}/include)
+link_directories($ENV{CONDA_PREFIX}/lib)
 
 add_executable(varcount varcount.cpp hts_util.hpp)
-target_link_libraries(varcount ${PKG_HTSLIB_LDFLAGS})
+target_link_libraries(varcount ${LIB_HTS})
 
 add_executable(vcf_score vcf_score.cpp hts_util.hpp)
-target_link_libraries(vcf_score ${PKG_HTSLIB_LDFLAGS})
+target_link_libraries(vcf_score ${LIB_HTS})
 
 INSTALL(TARGETS varcount DESTINATION bin)

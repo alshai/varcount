@@ -27,7 +27,7 @@ namespace hts_util {
         std::string alt = "";
         std::string ref = "";
         // the following WON'T be used in comparators!
-        std::string id = ""; 
+        std::string id = "";
         std::array<int32_t, 2> ad = {0, 0};
         // int32_t rc = 0;
         // int32_t ac = 0;
@@ -215,9 +215,9 @@ namespace hts_util {
 
     inline std::array<double, 3> get_gls_naive(int rc, int ac, double e) {
         std::array<double, 3> gls;
-        gls[0] =  (rc*std::log10(1-e)) + (ac*std::log10(e));
-        gls[1] =  -1 * (rc + ac) * std::log10(2);
-        gls[2] =  (ac*std::log10(1-e)) + (rc*std::log10(e));
+        for (int i = 0; i < 3; ++i) {
+            gls[2-i] = -(rc+ac) + (rc*std::log2( (2-i)*e + i*(1-e) )) + (ac*std::log2( (2-i)*(1-e) + i*e ));
+        }
         return gls;
     }
 
